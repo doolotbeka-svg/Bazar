@@ -59,7 +59,7 @@ export interface UserProfile {
   name: string;
   phone?: string;
   email?: string;
-  authMethod: 'phone' | 'google';
+  authMethod: 'phone' | 'google' | 'telegram';
   joinedAt: string;
 }
 

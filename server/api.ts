@@ -13,6 +13,7 @@ import {
   verifySessionToken
 } from './auth.ts';
 import { getGoogleClientId, verifyGoogleIdToken } from './google.ts';
+import { getTelegramBotName, verifyTelegramAuth } from './telegram.ts';
 import { createSmsSender, isSmsDemoMode } from './sms.ts';
 
 const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
@@ -313,7 +314,11 @@ export function createApiApp() {
 
   // What the sign-in screen can offer
   app.get('/api/auth/config', (_req, res) => {
-    res.json({ googleClientId: getGoogleClientId(), smsDemo: isSmsDemoMode(sms) });
+    res.json({
+      googleClientId: getGoogleClientId(),
+      telegramBot: getTelegramBotName(),
+      smsDemo: isSmsDemoMode(sms)
+    });
   });
 
   app.post(
@@ -419,6 +424,27 @@ export function createApiApp() {
           name: identity.name.slice(0, 80),
           email: identity.email,
           authMethod: 'google',
+          joinedAt: String(new Date().getFullYear())
+        };
+        data.users[userId] = user;
+        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
+      });
+      res.json(result);
+    })
+  );
+
+  app.post(
+    '/api/auth/telegram',
+    wrap(async (req, res) => {
+      if (!getTelegramBotName()) throw new HttpError(404, 'Telegram sign-in is not configured');
+      const identity = verifyTelegramAuth(req.body);
+      if (!identity) throw new HttpError(401, 'Invalid Telegram login data');
+      const userId = `telegram-${identity.id}`;
+      const result = await mutate((data) => {
+        const user: UserProfile = data.users[userId] || {
+          id: userId,
+          name: identity.name,
+          authMethod: 'telegram',
           joinedAt: String(new Date().getFullYear())
         };
         data.users[userId] = user;

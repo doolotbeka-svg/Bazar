@@ -18,6 +18,7 @@ import { formatKyrgyzPhoneInput, isValidKyrgyzPhone, getLocalizedTitle, formatPr
 import { getLocationName } from '../data/locations';
 import { ListingCard } from './ListingCard';
 import { GoogleSignInButton } from './GoogleSignInButton';
+import { TelegramLoginButton, type TelegramAuthData } from './TelegramLoginButton';
 
 interface AccountViewProps {
   user: UserProfile | null;
@@ -54,7 +55,8 @@ export function AccountView({
 }: AccountViewProps) {
   const { lang, t } = useI18n();
 
-  const [authMethod, setAuthMethod] = useState<'phone' | 'google'>('phone');
+  const [authMethod, setAuthMethod] = useState<'phone' | 'google' | 'telegram'>('phone');
+  const authMethodTouched = useRef(false);
   const [phone, setPhone] = useState('+996 (');
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -63,14 +65,20 @@ export function AccountView({
   const [authLoading, setAuthLoading] = useState(false);
 
   // Which sign-in methods the server has configured
-  const [authConfig, setAuthConfig] = useState<{ googleClientId: string | null; smsDemo: boolean } | null>(null);
+  const [authConfig, setAuthConfig] = useState<{ googleClientId: string | null; telegramBot: string | null; smsDemo: boolean } | null>(
+    null
+  );
   useEffect(() => {
     if (user) return;
     let active = true;
     fetch('/api/auth/config')
       .then((res) => (res.ok ? res.json() : null))
       .then((cfg) => {
-        if (active && cfg) setAuthConfig(cfg);
+        if (active && cfg) {
+          setAuthConfig(cfg);
+          // Telegram is the main real sign-in while SMS is in demo mode
+          if (cfg.telegramBot && !authMethodTouched.current) setAuthMethod('telegram');
+        }
       })
       .catch(() => {});
     return () => {
@@ -169,6 +177,25 @@ export function AccountView({
     }
   };
 
+  const handleTelegramAuth = async (payload: TelegramAuthData) => {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const res = await fetch('/api/auth/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('telegram auth failed');
+      const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
+      onLogin(data.user, data.favorites || [], data.token);
+    } catch {
+      setAuthError(lang === 'kg' ? 'Telegram аркылуу кирүү ишке ашкан жок' : 'Не удалось войти через Telegram');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleGoogleCredential = async (credential: string) => {
     setAuthError(null);
     setAuthLoading(true);
@@ -246,35 +273,29 @@ export function AccountView({
           <p className="mt-1.5 text-sm text-slate-600">{t('account.authSubtitle')}</p>
 
           {/* Segmented Auth Method Tabs */}
-          <div className="mt-5 grid grid-cols-2 gap-1 p-1 bg-slate-200/70 rounded-xl">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMethod('phone');
-                setAuthError(null);
-              }}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                authMethod === 'phone'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('account.phoneTab')}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMethod('google');
-                setAuthError(null);
-              }}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                authMethod === 'google'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('account.googleTab')}
-            </button>
+          <div className="mt-5 grid grid-cols-3 gap-1 p-1 bg-slate-200/70 rounded-xl">
+            {(
+              [
+                ['telegram', 'Telegram'],
+                ['phone', lang === 'kg' ? 'Телефон' : 'Телефон'],
+                ['google', 'Google']
+              ] as const
+            ).map(([method, label]) => (
+              <button
+                key={method}
+                type="button"
+                onClick={() => {
+                  authMethodTouched.current = true;
+                  setAuthMethod(method);
+                  setAuthError(null);
+                }}
+                className={`py-2 px-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  authMethod === method ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {authError && (
@@ -366,6 +387,28 @@ export function AccountView({
                 </button>
               </form>
             )
+          ) : authMethod === 'telegram' ? (
+            <div className="mt-5 space-y-3">
+              {authConfig?.telegramBot ? (
+                <>
+                  <p className="text-sm text-slate-600 text-center">
+                    {lang === 'kg'
+                      ? 'Telegram аккаунтуңуз менен бир баскыч менен кириңиз.'
+                      : 'Войдите одной кнопкой через ваш аккаунт Telegram.'}
+                  </p>
+                  <TelegramLoginButton botName={authConfig.telegramBot} lang={lang} onAuth={handleTelegramAuth} />
+                  {authLoading && (
+                    <p className="text-center text-xs text-slate-500">{lang === 'kg' ? 'Текшерилүүдө…' : 'Проверяем…'}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-3.5">
+                  {lang === 'kg'
+                    ? 'Telegram аркылуу кирүү жакында иштейт. Азырынча телефон номери менен кириңиз.'
+                    : 'Вход через Telegram скоро заработает. Пока войдите по номеру телефона.'}
+                </p>
+              )}
+            </div>
           ) : (
             <div className="mt-5 space-y-3">
               {authConfig?.googleClientId ? (
