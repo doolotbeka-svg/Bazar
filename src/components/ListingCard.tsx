@@ -117,7 +117,7 @@ export function ListingCard({
             <a
               href={href}
               onClick={onLinkClick}
-              className="flex-1 text-[15px] sm:text-[17px] font-medium text-brand-600 group-hover:text-rose-600 leading-snug line-clamp-2"
+              className="flex-1 text-[15px] sm:text-[17px] font-medium text-brand-600 group-hover:text-brand-800 group-hover:underline underline-offset-2 leading-snug line-clamp-2"
             >
               {title}
             </a>
@@ -147,7 +147,7 @@ export function ListingCard({
         <a
           href={href}
           onClick={onLinkClick}
-          className="flex-1 min-w-0 text-[14px] md:text-[15px] text-brand-600 group-hover:text-rose-600 leading-snug line-clamp-2"
+          className="flex-1 min-w-0 text-[14px] md:text-[15px] text-brand-600 group-hover:text-brand-800 group-hover:underline underline-offset-2 leading-snug line-clamp-2"
         >
           {title}
         </a>

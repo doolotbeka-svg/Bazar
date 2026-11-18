@@ -143,7 +143,7 @@ export function ListingPage({
     <div className="pb-24 md:pb-12">
       {/* Breadcrumbs */}
       <nav aria-label="breadcrumbs" className="pt-2 md:pt-4 flex items-center gap-1.5 text-[13px] md:text-sm text-slate-500 overflow-x-auto no-scrollbar whitespace-nowrap">
-        <button type="button" onClick={onBack} className="flex items-center gap-0.5 text-brand-600 hover:text-rose-600 cursor-pointer">
+        <button type="button" onClick={onBack} className="flex items-center gap-0.5 text-brand-600 hover:text-brand-800 hover:underline underline-offset-2 cursor-pointer">
           <ChevronLeft className="w-4 h-4" />
           {t('nav.home')}
         </button>
@@ -151,7 +151,7 @@ export function ListingPage({
         <button
           type="button"
           onClick={() => onOpenCategory(listing.category)}
-          className="text-brand-600 hover:text-rose-600 cursor-pointer"
+          className="text-brand-600 hover:text-brand-800 hover:underline underline-offset-2 cursor-pointer"
         >
           {t(`categories.${listing.category}`)}
         </button>

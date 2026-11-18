@@ -49,7 +49,7 @@ export function FiltersSidebar({
               type="button"
               onClick={() => onChange({ categoryId: 'all' })}
               className={`w-full text-left py-1 text-[15px] cursor-pointer ${
-                filters.categoryId === 'all' ? 'font-semibold text-slate-900' : 'text-brand-600 hover:text-rose-600'
+                filters.categoryId === 'all' ? 'font-semibold text-slate-900' : 'text-brand-600 hover:text-brand-800 hover:underline underline-offset-2'
               }`}
             >
               {t('hero.allCategories')}
@@ -63,7 +63,7 @@ export function FiltersSidebar({
                 className={`w-full flex items-baseline justify-between gap-2 text-left py-1 pl-3 text-[15px] cursor-pointer ${
                   filters.categoryId === cat.id
                     ? 'font-semibold text-slate-900'
-                    : 'text-brand-600 hover:text-rose-600'
+                    : 'text-brand-600 hover:text-brand-800 hover:underline underline-offset-2'
                 }`}
               >
                 <span>{t(`categories.${cat.id}`)}</span>
