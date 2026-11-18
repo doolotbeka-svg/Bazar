@@ -1,101 +1,37 @@
 import React from 'react';
-import {
-  Car,
-  Building2,
-  Smartphone,
-  Sofa,
-  Briefcase,
-  Wrench,
-  Shirt,
-  PawPrint,
-  LayoutGrid
-} from 'lucide-react';
 import { MARKETPLACE_CATEGORIES } from '../data/categories';
 import { useI18n } from '../contexts/I18nContext';
-import { CategoryId, Listing } from '../types/marketplace';
+import { CategoryId } from '../types/marketplace';
+import { CATEGORY_ACCENTS, CATEGORY_ICONS } from './categoryIcons';
 
 interface CategoryGridProps {
-  selectedCategory: CategoryId | 'all';
-  onSelectCategory: (cat: CategoryId | 'all') => void;
-  listings: Listing[];
+  onSelectCategory: (cat: CategoryId) => void;
 }
 
-const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  Car,
-  Building2,
-  Smartphone,
-  Sofa,
-  Briefcase,
-  Wrench,
-  Shirt,
-  PawPrint
-};
-
-export function CategoryGrid({
-  selectedCategory,
-  onSelectCategory,
-  listings
-}: CategoryGridProps) {
+/** Home page category tiles: label top-left, illustration bottom-right. */
+export function CategoryGrid({ onSelectCategory }: CategoryGridProps) {
   const { t } = useI18n();
 
-  const getCategoryCount = (catId: CategoryId) =>
-    listings.filter((l) => l.status === 'active' && l.category === catId).length;
-
   return (
-    <section aria-labelledby="categories-heading" className="py-5">
-      <div className="flex items-center justify-between mb-3.5">
-        <h2 id="categories-heading" className="text-lg sm:text-xl font-bold text-slate-900">
-          {t('categories.title')}
-        </h2>
-        {selectedCategory !== 'all' && (
-          <button
-            type="button"
-            onClick={() => onSelectCategory('all')}
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer flex items-center gap-1.5 min-h-[36px]"
-          >
-            <LayoutGrid className="w-4 h-4" />
-            <span>{t('categories.all')}</span>
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
+    <section aria-label={t('categories.title')} className="pt-2 pb-6 md:pt-6 md:pb-8">
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2 md:gap-3">
         {MARKETPLACE_CATEGORIES.map((cat) => {
-          const IconComponent = ICON_MAP[cat.icon] || LayoutGrid;
-          const isActive = selectedCategory === cat.id;
-          const count = getCategoryCount(cat.id);
-
+          const Icon = CATEGORY_ICONS[cat.id];
           return (
             <button
               key={cat.id}
               type="button"
-              onClick={() => onSelectCategory(isActive ? 'all' : cat.id)}
-              className={`group flex flex-col items-start justify-between p-3.5 rounded-xl border text-left transition-all duration-150 min-h-[92px] cursor-pointer ${
-                isActive
-                  ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                  : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/80 text-slate-800'
-              }`}
+              onClick={() => onSelectCategory(cat.id)}
+              className="group relative overflow-hidden flex flex-col items-start justify-start h-[84px] md:h-[104px] rounded-xl md:rounded-2xl bg-tile hover:bg-tile-hover text-left p-2.5 md:p-3 cursor-pointer transition-colors"
             >
-              <div className="w-full flex items-center justify-between">
-                <div
-                  className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
-                    isActive
-                      ? 'bg-white/20 text-white'
-                      : 'bg-white border border-slate-200/80 text-emerald-700 group-hover:border-emerald-300'
-                  }`}
-                >
-                  <IconComponent className="w-4.5 h-4.5" />
-                </div>
-                <span
-                  className={`text-xs font-medium tabular-nums ${
-                    isActive ? 'text-emerald-100' : 'text-slate-400'
-                  }`}
-                >
-                  {count}
-                </span>
-              </div>
-              <span className="mt-2.5 text-xs sm:text-[13px] font-semibold leading-snug line-clamp-2">
+              <span className="relative z-10 block text-[12px] md:text-[14px] font-semibold leading-tight text-slate-900 line-clamp-2 pr-1 hyphens-auto">
                 {t(`categories.${cat.id}`)}
+              </span>
+              <span
+                className={`absolute -right-3 -bottom-3 w-14 h-14 md:w-[72px] md:h-[72px] rounded-full flex items-center justify-center transition-transform group-hover:scale-105 ${CATEGORY_ACCENTS[cat.id]}`}
+                aria-hidden="true"
+              >
+                <Icon className="w-6 h-6 md:w-8 md:h-8 -translate-x-1 -translate-y-1" strokeWidth={1.8} />
               </span>
             </button>
           );

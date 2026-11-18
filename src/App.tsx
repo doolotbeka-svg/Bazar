@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Crown, RotateCcw, SearchX } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { LayoutGrid, List, SearchX, SlidersHorizontal, X } from 'lucide-react';
 import { useI18n } from './contexts/I18nContext';
 import { SEED_LISTINGS } from './data/seedListings';
-import { matchesLocationFilter, KYRGYZSTAN_LOCATIONS } from './data/locations';
+import { matchesLocationFilter, KYRGYZSTAN_LOCATIONS, getLocationName } from './data/locations';
 import { MARKETPLACE_CATEGORIES } from './data/categories';
 import {
   AppView,
@@ -14,17 +14,28 @@ import {
 } from './types/marketplace';
 import { Header } from './components/Header';
 import { MobileBottomNav } from './components/MobileBottomNav';
-import { SearchAndFilters } from './components/SearchAndFilters';
 import { CategoryGrid } from './components/CategoryGrid';
 import { ListingCard } from './components/ListingCard';
-import { ListingDetailModal } from './components/ListingDetailModal';
+import { ListingPage } from './components/ListingPage';
+import { FiltersSidebar, SearchFilters } from './components/FiltersSidebar';
 import { PostAdModal } from './components/PostAdModal';
 import { AccountView } from './components/AccountView';
 
 const USER_STORAGE_KEY = 'tezbazar_user';
 const FAVORITES_STORAGE_KEY = 'tezbazar_favorites';
 const OWN_ADS_STORAGE_KEY = 'tezbazar_own_ads';
+const LAYOUT_STORAGE_KEY = 'tezbazar_layout';
 const AD_QUERY_PARAM = 'ad';
+const USD_TO_KGS = 87;
+
+const EMPTY_FILTERS: SearchFilters = {
+  categoryId: 'all',
+  locationId: 'all',
+  priceFrom: '',
+  priceTo: '',
+  negotiableOnly: false,
+  withPhotoOnly: false
+};
 
 function readJsonArray(key: string): string[] {
   try {
@@ -36,38 +47,43 @@ function readJsonArray(key: string): string[] {
   }
 }
 
-function setAdQueryParam(id: string | null) {
-  try {
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set(AD_QUERY_PARAM, id);
-    else url.searchParams.delete(AD_QUERY_PARAM);
-    window.history.replaceState(null, '', url.toString());
-  } catch {
-    // ignore
-  }
+function urlWithAd(id: string | null): string {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set(AD_QUERY_PARAM, id);
+  else url.searchParams.delete(AD_QUERY_PARAM);
+  return url.toString();
 }
+
+const toKgs = (l: Listing) => (l.price === null ? 0 : l.currency === 'USD' ? l.price * USD_TO_KGS : l.price);
 
 export default function App() {
   const { lang, t } = useI18n();
 
   const [listings, setListings] = useState<Listing[]>(SEED_LISTINGS);
   const [loadingListings, setLoadingListings] = useState(true);
+  const listingsRef = useRef(listings);
+  listingsRef.current = listings;
 
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [accountTab, setAccountTab] = useState<'my_ads' | 'favorites' | 'promote'>('my_ads');
 
-  // Filters
+  // Search: the header input is applied only on submit
+  const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
-  const [locationId, setLocationId] = useState('all');
-  const [categoryId, setCategoryId] = useState<CategoryId | 'all'>('all');
+  const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [sortBy, setSortBy] = useState<SortOption>('newest');
-  const [negotiableOnly, setNegotiableOnly] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [layout, setLayout] = useState<'grid' | 'list'>(() => {
+    try {
+      return localStorage.getItem(LAYOUT_STORAGE_KEY) === 'list' ? 'list' : 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
 
-  // Modals
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [isPostAdOpen, setIsPostAdOpen] = useState(false);
 
-  // User & Favorites
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem(USER_STORAGE_KEY);
@@ -76,9 +92,7 @@ export default function App() {
       return null;
     }
   });
-
   const [favorites, setFavorites] = useState<string[]>(() => readJsonArray(FAVORITES_STORAGE_KEY));
-
   // IDs of ads posted from this browser (also covers ads posted before signing in)
   const [ownAdIds, setOwnAdIds] = useState<string[]>(() => readJsonArray(OWN_ADS_STORAGE_KEY));
 
@@ -107,6 +121,18 @@ export default function App() {
     };
   }, []);
 
+  // Browser back/forward between the feed and a listing page
+  useEffect(() => {
+    const onPop = () => {
+      const id = new URLSearchParams(window.location.search).get(AD_QUERY_PARAM);
+      setSelectedListing(id ? listingsRef.current.find((l) => l.id === id) || null : null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  /* ---------------- favorites / own ads ---------------- */
+
   const persistFavorites = (nextFavs: string[], currentUser: UserProfile | null) => {
     setFavorites(nextFavs);
     try {
@@ -124,8 +150,7 @@ export default function App() {
   };
 
   const handleToggleFavorite = (id: string) => {
-    const exists = favorites.includes(id);
-    const next = exists ? favorites.filter((item) => item !== id) : [...favorites, id];
+    const next = favorites.includes(id) ? favorites.filter((item) => item !== id) : [...favorites, id];
     persistFavorites(next, user);
   };
 
@@ -138,35 +163,97 @@ export default function App() {
     }
   };
 
+  /* ---------------- navigation ---------------- */
+
+  const closeListingSilently = () => {
+    if (!selectedListing) return;
+    setSelectedListing(null);
+    try {
+      window.history.replaceState(null, '', urlWithAd(null));
+    } catch {
+      // ignore
+    }
+  };
+
   const handleSelectListing = (listing: Listing) => {
     setSelectedListing({ ...listing, views: listing.views + 1 });
-    setAdQueryParam(listing.id);
+    try {
+      window.history.pushState({ ad: listing.id }, '', urlWithAd(listing.id));
+    } catch {
+      // ignore
+    }
     setListings((prev) =>
       prev.map((item) => (item.id === listing.id ? { ...item, views: item.views + 1 } : item))
     );
     fetch(`/api/listings/${listing.id}/view`, { method: 'POST' }).catch(() => {});
   };
 
+  const handleCloseListing = () => {
+    // Opened from the feed -> go back in history; opened from a shared link -> just clear it
+    if ((window.history.state as { ad?: string } | null)?.ad) {
+      window.history.back();
+    } else {
+      closeListingSilently();
+    }
+  };
+
+  const goHome = () => {
+    closeListingSilently();
+    setCurrentView('home');
+    setQueryInput('');
+    setQuery('');
+    setFilters(EMPTY_FILTERS);
+    window.scrollTo({ top: 0 });
+  };
+
+  const showResults = () => {
+    closeListingSilently();
+    setCurrentView('home');
+    setQuery(queryInput.trim());
+    window.scrollTo({ top: 0 });
+  };
+
+  const openCategory = (cat: CategoryId) => {
+    closeListingSilently();
+    setCurrentView('home');
+    setFilters((f) => ({ ...f, categoryId: cat }));
+    window.scrollTo({ top: 0 });
+  };
+
+  const openAccount = (tab?: 'my_ads' | 'favorites' | 'promote') => {
+    closeListingSilently();
+    setCurrentView('account');
+    if (tab) setAccountTab(tab);
+    else if (accountTab === 'favorites') setAccountTab('my_ads');
+    window.scrollTo({ top: 0 });
+  };
+
+  const changeLayout = (next: 'grid' | 'list') => {
+    setLayout(next);
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  };
+
+  /* ---------------- listing actions ---------------- */
+
   const handleCreatedListing = (created: Listing) => {
     setListings((prev) => [created, ...prev]);
     persistOwnAds([...ownAdIds, created.id]);
-    setCurrentView('home');
-    setCategoryId('all');
-    setLocationId('all');
-    setQuery('');
+    goHome();
   };
 
   const handleDeleteListing = (id: string) => {
     setListings((prev) => prev.filter((item) => item.id !== id));
     persistOwnAds(ownAdIds.filter((item) => item !== id));
-    if (selectedListing?.id === id) setSelectedListing(null);
+    if (selectedListing?.id === id) closeListingSilently();
     fetch(`/api/listings/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
   const handleToggleStatus = (id: string, nextStatus: 'active' | 'sold') => {
-    setListings((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item))
-    );
+    setListings((prev) => prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)));
     fetch(`/api/listings/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -175,9 +262,7 @@ export default function App() {
   };
 
   const handlePromoteListing = (id: string, tier: PromoteTier) => {
-    setListings((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, promoteTier: tier } : item))
-    );
+    setListings((prev) => prev.map((item) => (item.id === id ? { ...item, promoteTier: tier } : item)));
     fetch(`/api/listings/${id}/promote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -192,8 +277,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    const mergedFavs = Array.from(new Set([...favorites, ...serverFavorites]));
-    persistFavorites(mergedFavs, loggedInUser);
+    persistFavorites(Array.from(new Set([...favorites, ...serverFavorites])), loggedInUser);
   };
 
   const handleLogout = () => {
@@ -205,280 +289,341 @@ export default function App() {
     }
   };
 
-  const resetFilters = () => {
-    setQuery('');
-    setLocationId('all');
-    setCategoryId('all');
-    setNegotiableOnly(false);
-    setSortBy('newest');
-  };
+  /* ---------------- search ---------------- */
 
-  const hasActiveFilters =
-    query.trim().length > 0 ||
-    locationId !== 'all' ||
-    categoryId !== 'all' ||
-    negotiableOnly;
+  const isSearching =
+    query.length > 0 ||
+    filters.categoryId !== 'all' ||
+    filters.locationId !== 'all' ||
+    filters.priceFrom !== '' ||
+    filters.priceTo !== '' ||
+    filters.negotiableOnly ||
+    filters.withPhotoOnly;
 
-  const filteredListings = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const activeListings = useMemo(() => listings.filter((l) => l.status === 'active'), [listings]);
 
-    const matched = listings.filter((item) => {
-      if (item.status !== 'active') return false;
-      if (categoryId !== 'all' && item.category !== categoryId) return false;
-      if (!matchesLocationFilter(item.locationId, locationId)) return false;
-      if (negotiableOnly && !item.negotiable) return false;
-
+  // Matches everything except the category, so the sidebar can show per-category counts
+  const matchesNonCategory = useMemo(() => {
+    const q = query.toLowerCase();
+    const from = filters.priceFrom ? Number(filters.priceFrom) : null;
+    const to = filters.priceTo ? Number(filters.priceTo) : null;
+    return (item: Listing) => {
+      if (!matchesLocationFilter(item.locationId, filters.locationId)) return false;
+      if (filters.negotiableOnly && !item.negotiable) return false;
+      if (filters.withPhotoOnly && item.images.length === 0) return false;
+      if (from !== null || to !== null) {
+        if (item.price === null) return false;
+        const p = toKgs(item);
+        if (from !== null && p < from) return false;
+        if (to !== null && p > to) return false;
+      }
       if (q) {
-        const haystack = [
-          item.titleKg,
-          item.titleRu || '',
-          item.descriptionKg,
-          item.descriptionRu || ''
-        ]
+        const haystack = [item.titleKg, item.titleRu || '', item.descriptionKg, item.descriptionRu || '']
           .join(' ')
           .toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
-    });
-
-    // Normalize price to KGS (~87 KGS/USD) for sorting comparison
-    const toComparablePrice = (l: Listing) => {
-      if (l.price === null) return 0;
-      return l.currency === 'USD' ? l.price * 87 : l.price;
     };
+  }, [query, filters.locationId, filters.negotiableOnly, filters.withPhotoOnly, filters.priceFrom, filters.priceTo]);
 
-    return [...matched].sort((a, b) => {
-      if (sortBy === 'price_asc') return toComparablePrice(a) - toComparablePrice(b);
-      if (sortBy === 'price_desc') return toComparablePrice(b) - toComparablePrice(a);
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const l of activeListings) if (matchesNonCategory(l)) counts[l.category] = (counts[l.category] || 0) + 1;
+    return counts;
+  }, [activeListings, matchesNonCategory]);
+
+  const results = useMemo(() => {
+    const matched = activeListings.filter(
+      (l) => (filters.categoryId === 'all' || l.category === filters.categoryId) && matchesNonCategory(l)
+    );
+    const tierRank = (l: Listing) => (l.promoteTier === 'none' ? 0 : 1);
+    return matched.sort((a, b) => {
+      if (sortBy === 'price_asc') return toKgs(a) - toKgs(b);
+      if (sortBy === 'price_desc') return toKgs(b) - toKgs(a);
       if (sortBy === 'views') return b.views - a.views;
-      // newest: prioritize 'top' tier within newest feed, then chronological
-      if (a.promoteTier === 'top' && b.promoteTier !== 'top') return -1;
-      if (b.promoteTier === 'top' && a.promoteTier !== 'top') return 1;
+      // newest: promoted ads first, then chronological
+      if (tierRank(a) !== tierRank(b)) return tierRank(b) - tierRank(a);
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [listings, query, categoryId, locationId, negotiableOnly, sortBy]);
+  }, [activeListings, filters.categoryId, matchesNonCategory, sortBy]);
 
-  const vipListings = useMemo(
-    () => filteredListings.filter((item) => item.promoteTier === 'vip'),
-    [filteredListings]
+  const vipListings = useMemo(() => activeListings.filter((l) => l.promoteTier === 'vip'), [activeListings]);
+  const recommended = useMemo(
+    () =>
+      [...activeListings].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [activeListings]
   );
 
-  const regularFeedListings = useMemo(
-    () => filteredListings.filter((item) => item.promoteTier !== 'vip'),
-    [filteredListings]
+  const searchHeading = [
+    filters.categoryId !== 'all' ? t(`categories.${filters.categoryId}`) : t('search.title'),
+    filters.locationId !== 'all'
+      ? `${t('search.in')} ${getLocationName(filters.locationId, lang)}`.trim()
+      : t('search.inAll')
+  ].join(' ');
+
+  const footerCities = KYRGYZSTAN_LOCATIONS.filter((l) => l.type === 'city').slice(0, 8);
+
+  const renderCards = (items: Listing[], mode: 'grid' | 'list', cols: string) =>
+    mode === 'list' ? (
+      <div className="flex flex-col">
+        {items.map((item) => (
+          <ListingCard
+            key={item.id}
+            listing={item}
+            layout="list"
+            isFavorite={favorites.includes(item.id)}
+            onToggleFavorite={handleToggleFavorite}
+            onSelect={handleSelectListing}
+          />
+        ))}
+      </div>
+    ) : (
+      <div className={`grid ${cols} gap-x-3 md:gap-x-4 gap-y-6`}>
+        {items.map((item) => (
+          <ListingCard
+            key={item.id}
+            listing={item}
+            isFavorite={favorites.includes(item.id)}
+            onToggleFavorite={handleToggleFavorite}
+            onSelect={handleSelectListing}
+          />
+        ))}
+      </div>
+    );
+
+  const filtersSidebar = (onDone?: () => void) => (
+    <FiltersSidebar
+      filters={filters}
+      onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
+      onReset={() => {
+        setFilters(EMPTY_FILTERS);
+        setQuery('');
+        setQueryInput('');
+      }}
+      categoryCounts={categoryCounts}
+      resultCount={results.length}
+      onDone={onDone}
+    />
   );
 
-  const footerCities = KYRGYZSTAN_LOCATIONS.filter((l) => l.type === 'city').slice(0, 7);
+  /* ---------------- render ---------------- */
+
+  let page: React.ReactNode;
+  if (selectedListing) {
+    page = (
+      <ListingPage
+        listing={selectedListing}
+        allListings={listings}
+        favorites={favorites}
+        onToggleFavorite={handleToggleFavorite}
+        onSelect={handleSelectListing}
+        onBack={handleCloseListing}
+        onOpenCategory={openCategory}
+      />
+    );
+  } else if (currentView === 'account') {
+    page = (
+      <AccountView
+        user={user}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        activeTab={accountTab}
+        onTabChange={setAccountTab}
+        listings={listings}
+        ownAdIds={ownAdIds}
+        favorites={favorites}
+        onToggleFavorite={handleToggleFavorite}
+        onSelectListing={handleSelectListing}
+        onDeleteListing={handleDeleteListing}
+        onToggleStatus={handleToggleStatus}
+        onPromoteListing={handlePromoteListing}
+        onOpenPostAd={() => setIsPostAdOpen(true)}
+      />
+    );
+  } else if (!isSearching) {
+    page = (
+      <>
+        <CategoryGrid onSelectCategory={openCategory} />
+
+        {vipListings.length > 0 && (
+          <section className="pb-8">
+            <h2 className="text-[20px] md:text-[26px] font-bold mb-4">{t('home.vip')}</h2>
+            {renderCards(vipListings.slice(0, 5), 'grid', 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5')}
+          </section>
+        )}
+
+        <section className="pb-12">
+          <h2 className="text-[20px] md:text-[26px] font-bold mb-4">{t('home.recommendations')}</h2>
+          {loadingListings && listings.length === 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <div key={s} className="aspect-[4/3] rounded-xl bg-tile animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            renderCards(recommended, 'grid', 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5')
+          )}
+        </section>
+      </>
+    );
+  } else {
+    page = (
+      <div className="pt-3 md:pt-6 pb-12">
+        <h1 className="text-[22px] md:text-[30px] font-bold leading-tight">
+          {query ? `«${query}» — ` : ''}
+          {searchHeading}
+        </h1>
+        <div className="mt-1 text-sm text-slate-500 tabular-nums">
+          {t('feed.resultsCount')}: {results.length}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-8">
+          <aside className="hidden lg:block">{filtersSidebar()}</aside>
+
+          <div className="min-w-0">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <button
+                type="button"
+                onClick={() => setMobileFiltersOpen(true)}
+                className="lg:hidden h-10 px-3.5 rounded-xl bg-tile text-[14px] font-medium flex items-center gap-2 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-4.5 h-4.5" />
+                {t('search.filters')}
+              </button>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                aria-label={t('feed.sortLabel')}
+                className="h-10 px-3 rounded-xl bg-tile text-[14px] font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500"
+              >
+                <option value="newest">{t('feed.sortNewest')}</option>
+                <option value="price_asc">{t('feed.sortPriceAsc')}</option>
+                <option value="price_desc">{t('feed.sortPriceDesc')}</option>
+                <option value="views">{t('feed.sortViews')}</option>
+              </select>
+              <div className="ml-auto flex items-center gap-1 p-0.5 rounded-xl bg-tile">
+                {(
+                  [
+                    ['grid', LayoutGrid, t('search.grid')],
+                    ['list', List, t('search.list')]
+                  ] as const
+                ).map(([mode, Icon, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => changeLayout(mode)}
+                    aria-label={label}
+                    aria-pressed={layout === mode}
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center cursor-pointer ${
+                      layout === mode ? 'bg-white shadow-xs text-slate-900' : 'text-slate-500'
+                    }`}
+                  >
+                    <Icon className="w-4.5 h-4.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {results.length === 0 ? (
+              <div className="py-16 px-6 rounded-2xl bg-tile text-center">
+                <SearchX className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                <h3 className="text-[17px] font-bold">{t('feed.emptyTitle')}</h3>
+                <p className="mt-1 text-sm text-slate-600 max-w-md mx-auto">{t('feed.emptySubtitle')}</p>
+                <button
+                  type="button"
+                  onClick={goHome}
+                  className="mt-4 h-11 px-5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold cursor-pointer"
+                >
+                  {t('feed.resetFilters')}
+                </button>
+              </div>
+            ) : (
+              renderCards(results, layout, 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4')
+            )}
+          </div>
+        </div>
+
+        {/* Mobile filters sheet */}
+        {mobileFiltersOpen && (
+          <div className="lg:hidden fixed inset-0 z-50 bg-white overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 h-14 flex items-center justify-between">
+              <span className="text-[17px] font-bold">{t('search.filters')}</span>
+              <button
+                type="button"
+                onClick={() => setMobileFiltersOpen(false)}
+                aria-label={t('search.hideFilters')}
+                className="w-10 h-10 -mr-2 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-4">{filtersSidebar(() => setMobileFiltersOpen(false))}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 pb-[72px] md:pb-0">
+    <div className={`min-h-screen flex flex-col bg-white text-slate-900 ${selectedListing ? '' : 'pb-[64px] md:pb-0'}`}>
       <Header
-        currentView={currentView}
-        onNavigate={(view) => {
-          setCurrentView(view);
-          if (view === 'account' && accountTab === 'favorites') {
-            setAccountTab('my_ads');
-          }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onGoHome={goHome}
         onOpenPostAd={() => setIsPostAdOpen(true)}
+        onOpenFavorites={() => openAccount('favorites')}
+        onOpenAccount={() => openAccount()}
         favoritesCount={favorites.length}
         user={user}
-        onOpenFavorites={() => {
-          setCurrentView('account');
-          setAccountTab('favorites');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        query={queryInput}
+        onQueryChange={setQueryInput}
+        onSubmitSearch={showResults}
+        categoryId={filters.categoryId}
+        onCategoryChange={(cat) => setFilters((f) => ({ ...f, categoryId: cat }))}
+        locationId={filters.locationId}
+        onLocationChange={(loc) => setFilters((f) => ({ ...f, locationId: loc }))}
+        listings={listings}
       />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6">
-        {currentView === 'home' ? (
-          <>
-            <SearchAndFilters
-              query={query}
-              onQueryChange={setQuery}
-              locationId={locationId}
-              onLocationChange={setLocationId}
-              categoryId={categoryId}
-              onCategoryChange={setCategoryId}
-              sortBy={sortBy}
-              onSortChange={setSortBy}
-              negotiableOnly={negotiableOnly}
-              onNegotiableOnlyChange={setNegotiableOnly}
-              onSubmitSearch={() => {
-                const feedEl = document.getElementById('listings-feed');
-                feedEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }}
-            />
+      <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 md:px-6">{page}</main>
 
-            <CategoryGrid
-              selectedCategory={categoryId}
-              onSelectCategory={setCategoryId}
-              listings={listings}
-            />
-
-            {/* VIP Listings Block */}
-            {vipListings.length > 0 && (
-              <section aria-labelledby="vip-heading" className="py-5">
-                <div className="flex items-baseline justify-between gap-3 mb-3.5">
-                  <div className="flex items-center gap-2">
-                    <Crown className="w-5 h-5 text-amber-500 shrink-0" />
-                    <h2 id="vip-heading" className="text-lg sm:text-xl font-bold text-slate-900">
-                      {t('feed.vipTitle')}
-                    </h2>
-                  </div>
-                  <span className="text-xs text-slate-500 hidden sm:inline">
-                    {t('feed.vipSubtitle')}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
-                  {vipListings.map((item) => (
-                    <ListingCard
-                      key={item.id}
-                      listing={item}
-                      isFavorite={favorites.includes(item.id)}
-                      onToggleFavorite={handleToggleFavorite}
-                      onSelect={handleSelectListing}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Fresh Listings Feed */}
-            <section id="listings-feed" aria-labelledby="fresh-heading" className="py-5 pb-12">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <div className="flex items-baseline gap-2.5">
-                  <h2 id="fresh-heading" className="text-lg sm:text-xl font-bold text-slate-900">
-                    {t('feed.freshTitle')}
-                  </h2>
-                  <span className="text-xs font-medium text-slate-500 tabular-nums">
-                    {t('feed.resultsCount')}: {filteredListings.length}
-                  </span>
-                </div>
-
-                {hasActiveFilters && (
-                  <button
-                    type="button"
-                    onClick={resetFilters}
-                    className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer min-h-[36px]"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>{t('feed.resetFilters')}</span>
-                  </button>
-                )}
-              </div>
-
-              {loadingListings && listings.length === 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {[1, 2, 3, 4].map((skeleton) => (
-                    <div
-                      key={skeleton}
-                      className="h-72 rounded-xl bg-slate-100 animate-pulse border border-slate-200"
-                    />
-                  ))}
-                </div>
-              ) : filteredListings.length === 0 ? (
-                <div className="py-14 px-6 rounded-2xl bg-slate-50 border border-slate-200 text-center">
-                  <SearchX className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                  <h3 className="text-base font-bold text-slate-900">{t('feed.emptyTitle')}</h3>
-                  <p className="mt-1 text-sm text-slate-500 max-w-md mx-auto">
-                    {t('feed.emptySubtitle')}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={resetFilters}
-                    className="mt-4 min-h-[42px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold cursor-pointer"
-                  >
-                    {t('feed.resetFilters')}
-                  </button>
-                </div>
-              ) : (
-                regularFeedListings.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
-                    {regularFeedListings.map((item) => (
-                      <ListingCard
-                        key={item.id}
-                        listing={item}
-                        isFavorite={favorites.includes(item.id)}
-                        onToggleFavorite={handleToggleFavorite}
-                        onSelect={handleSelectListing}
-                      />
-                    ))}
-                  </div>
-                )
-              )}
-            </section>
-          </>
-        ) : (
-          <AccountView
-            user={user}
-            onLogin={handleLogin}
-            onLogout={handleLogout}
-            activeTab={accountTab}
-            onTabChange={setAccountTab}
-            listings={listings}
-            ownAdIds={ownAdIds}
-            favorites={favorites}
-            onToggleFavorite={handleToggleFavorite}
-            onSelectListing={handleSelectListing}
-            onDeleteListing={handleDeleteListing}
-            onToggleStatus={handleToggleStatus}
-            onPromoteListing={handlePromoteListing}
-            onOpenPostAd={() => setIsPostAdOpen(true)}
-          />
-        )}
-      </main>
-
-      {/* Clean Footer */}
-      <footer className="border-t border-slate-200 bg-slate-50 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 sm:grid-cols-3 gap-6 text-sm">
+      <footer className="bg-tile mt-auto">
+        <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-8 grid grid-cols-1 sm:grid-cols-3 gap-6 text-sm">
           <div>
-            <div className="text-base font-extrabold text-slate-900">{t('brand')}</div>
-            <p className="mt-2 text-xs sm:text-sm text-slate-500 leading-relaxed max-w-xs">
-              {t('footer.about')}
-            </p>
-          </div>
-
-          <div>
-            <div className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2.5">
-              {t('footer.regionsTitle')}
+            <div className="font-display text-[20px] font-extrabold">
+              Tez<span className="text-brand-500">Bazar</span>
             </div>
+            <p className="mt-2 text-[13px] text-slate-600 leading-relaxed max-w-xs">{t('footer.about')}</p>
+          </div>
+          <div>
+            <div className="text-[13px] font-bold text-slate-900 mb-2.5">{t('footer.regionsTitle')}</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {footerCities.map((city) => (
                 <button
                   key={city.id}
                   type="button"
                   onClick={() => {
+                    closeListingSilently();
                     setCurrentView('home');
-                    setLocationId(city.id);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    setFilters((f) => ({ ...f, locationId: city.id }));
+                    window.scrollTo({ top: 0 });
                   }}
-                  className="text-xs sm:text-sm text-slate-600 hover:text-emerald-700 hover:underline cursor-pointer"
+                  className="text-[13px] text-slate-600 hover:text-brand-600 cursor-pointer"
                 >
                   {city.name[lang]}
                 </button>
               ))}
             </div>
           </div>
-
           <div>
-            <div className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2.5">
-              {t('footer.categoriesTitle')}
-            </div>
+            <div className="text-[13px] font-bold text-slate-900 mb-2.5">{t('footer.categoriesTitle')}</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {MARKETPLACE_CATEGORIES.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() => {
-                    setCurrentView('home');
-                    setCategoryId(cat.id);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="text-xs sm:text-sm text-slate-600 hover:text-emerald-700 hover:underline cursor-pointer"
+                  onClick={() => openCategory(cat.id)}
+                  className="text-[13px] text-slate-600 hover:text-brand-600 cursor-pointer"
                 >
                   {t(`categories.${cat.id}`)}
                 </button>
@@ -486,45 +631,23 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="border-t border-slate-200/80 py-4 px-4 sm:px-6 text-center text-xs text-slate-400">
+        <div className="border-t border-black/5 py-4 px-4 text-center text-xs text-slate-500">
           {t('footer.copyright')}
         </div>
       </footer>
 
-      {/* Mobile Bottom Navigation */}
-      <MobileBottomNav
-        currentView={currentView}
-        activeAccountTab={accountTab}
-        onNavigateHome={() => {
-          setCurrentView('home');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenFavorites={() => {
-          setCurrentView('account');
-          setAccountTab('favorites');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenPostAd={() => setIsPostAdOpen(true)}
-        onOpenAccount={() => {
-          setCurrentView('account');
-          if (accountTab === 'favorites') setAccountTab('my_ads');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        favoritesCount={favorites.length}
-      />
+      {!selectedListing && (
+        <MobileBottomNav
+          currentView={currentView}
+          activeAccountTab={accountTab}
+          onNavigateHome={goHome}
+          onOpenFavorites={() => openAccount('favorites')}
+          onOpenPostAd={() => setIsPostAdOpen(true)}
+          onOpenAccount={() => openAccount()}
+          favoritesCount={favorites.length}
+        />
+      )}
 
-      {/* Listing Detail Modal */}
-      <ListingDetailModal
-        listing={selectedListing}
-        isFavorite={selectedListing ? favorites.includes(selectedListing.id) : false}
-        onClose={() => {
-          setSelectedListing(null);
-          setAdQueryParam(null);
-        }}
-        onToggleFavorite={handleToggleFavorite}
-      />
-
-      {/* Post Ad Modal */}
       <PostAdModal
         isOpen={isPostAdOpen}
         onClose={() => setIsPostAdOpen(false)}

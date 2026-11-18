@@ -37,7 +37,7 @@ export function MobileBottomNav({
         type="button"
         onClick={onNavigateHome}
         className={`flex flex-col items-center justify-center min-h-[48px] transition-colors cursor-pointer ${
-          isHome ? 'text-emerald-600' : 'text-slate-500'
+          isHome ? 'text-brand-600' : 'text-slate-500'
         }`}
       >
         <Home className="w-5 h-5" strokeWidth={isHome ? 2.4 : 1.8} />
@@ -50,13 +50,13 @@ export function MobileBottomNav({
         type="button"
         onClick={onOpenFavorites}
         className={`relative flex flex-col items-center justify-center min-h-[48px] transition-colors cursor-pointer ${
-          isFav ? 'text-emerald-600' : 'text-slate-500'
+          isFav ? 'text-brand-600' : 'text-slate-500'
         }`}
       >
         <div className="relative">
           <Heart className="w-5 h-5" strokeWidth={isFav ? 2.4 : 1.8} />
           {favoritesCount > 0 && (
-            <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+            <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
               {favoritesCount}
             </span>
           )}
@@ -69,7 +69,7 @@ export function MobileBottomNav({
       <button
         type="button"
         onClick={onOpenPostAd}
-        className="flex flex-col items-center justify-center min-h-[48px] text-emerald-600 cursor-pointer"
+        className="flex flex-col items-center justify-center min-h-[48px] text-brand-600 cursor-pointer"
       >
         <PlusCircle className="w-6 h-6" strokeWidth={2.2} />
         <span className="text-[11px] font-semibold mt-0.5 truncate max-w-[80px]">
@@ -81,7 +81,7 @@ export function MobileBottomNav({
         type="button"
         onClick={onOpenAccount}
         className={`flex flex-col items-center justify-center min-h-[48px] transition-colors cursor-pointer ${
-          isProfile ? 'text-emerald-600' : 'text-slate-500'
+          isProfile ? 'text-brand-600' : 'text-slate-500'
         }`}
       >
         <User className="w-5 h-5" strokeWidth={isProfile ? 2.4 : 1.8} />

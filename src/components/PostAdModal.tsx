@@ -280,7 +280,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
             <div
               key={s}
               className={`h-1.5 rounded-full transition-colors ${
-                s <= step ? 'bg-emerald-600' : 'bg-slate-200'
+                s <= step ? 'bg-brand-600' : 'bg-slate-200'
               }`}
             />
           ))}
@@ -311,12 +311,12 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                         onClick={() => handleSelectCategory(cat.id)}
                         className={`p-3 rounded-xl border text-left flex flex-col gap-2 transition-all min-h-[84px] cursor-pointer ${
                           active
-                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                            ? 'bg-brand-600 border-brand-600 text-white shadow-xs'
                             : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
                         }`}
                       >
                         <IconComponent
-                          className={`w-5 h-5 ${active ? 'text-white' : 'text-emerald-700'}`}
+                          className={`w-5 h-5 ${active ? 'text-white' : 'text-brand-700'}`}
                         />
                         <span className="text-xs font-semibold leading-snug">
                           {t(`categories.${cat.id}`)}
@@ -352,7 +352,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="aspect-square rounded-xl border-2 border-dashed border-slate-300 hover:border-emerald-600 bg-slate-50 hover:bg-emerald-50/40 flex flex-col items-center justify-center gap-1.5 text-slate-600 hover:text-emerald-700 transition-colors cursor-pointer"
+                      className="aspect-square rounded-xl border-2 border-dashed border-slate-300 hover:border-brand-600 bg-slate-50 hover:bg-brand-50/40 flex flex-col items-center justify-center gap-1.5 text-slate-600 hover:text-brand-700 transition-colors cursor-pointer"
                     >
                       <Upload className="w-5 h-5" />
                       <span className="text-[11px] font-semibold text-center px-1">
@@ -403,7 +403,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                   type="checkbox"
                   checked={bilingual}
                   onChange={(e) => setBilingual(e.target.checked)}
-                  className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer shrink-0"
+                  className="w-5 h-5 rounded border-slate-300 text-brand-600 focus:ring-brand-600 cursor-pointer shrink-0"
                 />
               </div>
 
@@ -419,7 +419,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                       onChange={(e) => setTitleKg(e.target.value)}
                       maxLength={120}
                       placeholder={t('postAd.titleKgPlaceholder')}
-                      className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
+                      className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
                     />
                   </div>
                   <div>
@@ -432,7 +432,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                       rows={4}
                       maxLength={2500}
                       placeholder={t('postAd.descKgPlaceholder')}
-                      className="w-full p-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600 resize-none"
+                      className="w-full p-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600 resize-none"
                     />
                   </div>
                 </div>
@@ -450,7 +450,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                       onChange={(e) => setTitleRu(e.target.value)}
                       maxLength={120}
                       placeholder={t('postAd.titleRuPlaceholder')}
-                      className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
+                      className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
                     />
                   </div>
                   <div>
@@ -463,7 +463,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                       rows={4}
                       maxLength={2500}
                       placeholder={t('postAd.descRuPlaceholder')}
-                      className="w-full p-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600 resize-none"
+                      className="w-full p-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600 resize-none"
                     />
                   </div>
                 </div>
@@ -485,7 +485,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                     value={priceStr}
                     onChange={(e) => setPriceStr(e.target.value)}
                     placeholder="0"
-                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-emerald-600"
+                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-brand-600"
                   />
                 </div>
 
@@ -531,7 +531,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                   type="checkbox"
                   checked={negotiable}
                   onChange={(e) => setNegotiable(e.target.checked)}
-                  className="w-4.5 h-4.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                  className="w-4.5 h-4.5 rounded border-slate-300 text-brand-600 focus:ring-brand-600 cursor-pointer"
                 />
                 <span>{t('postAd.negotiableCheck')}</span>
               </label>
@@ -543,7 +543,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                 <select
                   value={locationId}
                   onChange={(e) => setLocationId(e.target.value)}
-                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600 cursor-pointer"
+                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600 cursor-pointer"
                 >
                   <optgroup label={t('hero.citiesGroup')}>
                     {cities.map((c) => (
@@ -572,7 +572,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                     value={phone}
                     onChange={(e) => setPhone(formatKyrgyzPhoneInput(e.target.value))}
                     placeholder="+996 (700) 12-34-56"
-                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-emerald-600"
+                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-brand-600"
                   />
                 </div>
 
@@ -585,7 +585,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                     value={sellerName}
                     onChange={(e) => setSellerName(e.target.value)}
                     placeholder={t('postAd.sellerNamePlaceholder')}
-                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
+                    className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
                   />
                 </div>
               </div>
@@ -595,7 +595,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
                   type="checkbox"
                   checked={hasWhatsapp}
                   onChange={(e) => setHasWhatsapp(e.target.checked)}
-                  className="w-4.5 h-4.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                  className="w-4.5 h-4.5 rounded border-slate-300 text-brand-600 focus:ring-brand-600 cursor-pointer"
                 />
                 <span>{t('postAd.whatsappCheck')}</span>
               </label>
@@ -621,7 +621,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
               <button
                 type="button"
                 onClick={goToNext}
-                className="min-h-[44px] px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
+                className="min-h-[44px] px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <span>{t('postAd.nextStep')}</span>
                 <ChevronRight className="w-4 h-4" />
@@ -630,7 +630,7 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
               <button
                 type="submit"
                 disabled={submitting}
-                className="min-h-[44px] px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer"
+                className="min-h-[44px] px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer"
               >
                 <Check className="w-4 h-4" />
                 <span>{submitting ? t('postAd.submitting') : t('postAd.submit')}</span>
