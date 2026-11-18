@@ -20,6 +20,7 @@ import { MARKETPLACE_CATEGORIES } from '../data/categories';
 import { KYRGYZSTAN_LOCATIONS } from '../data/locations';
 import { CategoryId, Currency, Listing, UserProfile } from '../types/marketplace';
 import { formatKyrgyzPhoneInput, isValidKyrgyzPhone } from '../utils/format';
+import { authHeaders, saveAdKey } from '../lib/session';
 
 interface PostAdModalProps {
   isOpen: boolean;
@@ -216,19 +217,19 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
         phone,
         hasWhatsapp,
         sellerName: sellerName.trim() || user?.name || 'Сатуучу',
-        sellerId: user?.id || 'guest',
         sellerSince: user?.joinedAt || String(new Date().getFullYear())
       };
 
       const res = await fetch('/api/listings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
         throw new Error('Failed to create listing');
       }
-      const data = (await res.json()) as { listing: Listing };
+      const data = (await res.json()) as { listing: Listing; manageKey?: string };
+      if (data.manageKey) saveAdKey(data.listing.id, data.manageKey);
       onCreated(data.listing);
       // Reset state
       setStep(1);

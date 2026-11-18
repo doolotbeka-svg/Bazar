@@ -20,7 +20,7 @@ import { ListingCard } from './ListingCard';
 
 interface AccountViewProps {
   user: UserProfile | null;
-  onLogin: (user: UserProfile, serverFavorites: string[]) => void;
+  onLogin: (user: UserProfile, serverFavorites: string[], token: string) => void;
   onLogout: () => void;
   activeTab: 'my_ads' | 'favorites' | 'promote';
   onTabChange: (tab: 'my_ads' | 'favorites' | 'promote') => void;
@@ -112,8 +112,8 @@ export function AccountView({
         setAuthError(lang === 'kg' ? 'Код туура эмес (1234 жазыңыз)' : 'Неверный код (введите 1234)');
         return;
       }
-      const data = (await res.json()) as { user: UserProfile; favorites: string[] };
-      onLogin(data.user, data.favorites || []);
+      const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
+      onLogin(data.user, data.favorites || [], data.token);
     } catch {
       setAuthError(networkError);
     } finally {
@@ -137,8 +137,8 @@ export function AccountView({
         body: JSON.stringify({ email, name: googleName.trim() || email.split('@')[0] })
       });
       if (!res.ok) throw new Error('google auth failed');
-      const data = (await res.json()) as { user: UserProfile; favorites: string[] };
-      onLogin(data.user, data.favorites || []);
+      const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
+      onLogin(data.user, data.favorites || [], data.token);
     } catch {
       setAuthError(networkError);
     } finally {
