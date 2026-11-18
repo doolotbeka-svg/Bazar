@@ -39,40 +39,52 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   PawPrint
 };
 
-async function compressImageToDataUrl(file: File): Promise<string> {
+// Each photo is sent as a base64 data URL; 10 photos must fit into one request
+// (Vercel limit ~4.5 MB), so every photo is squeezed under this many characters.
+const MAX_PHOTO_DATA_URL_CHARS = 300_000;
+const MAX_PHOTO_SIDE = 1280;
+
+function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 1000;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(reader.result as string);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
-      };
-      img.onerror = reject;
-      img.src = reader.result as string;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Unsupported image'));
+    };
+    img.src = url;
   });
+}
+
+/** Resize to at most 1280px and re-encode as JPEG, lowering quality/size until it fits the budget. */
+async function compressImageToDataUrl(file: File): Promise<string> {
+  const img = await loadImage(file);
+  let side = MAX_PHOTO_SIDE;
+  let quality = 0.82;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+    const width = Math.max(1, Math.round(img.naturalWidth * scale));
+    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas unavailable');
+    // JPEG has no transparency: paint white so transparent PNGs don't turn black
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    if (dataUrl.length <= MAX_PHOTO_DATA_URL_CHARS) return dataUrl;
+    // Too big: first drop quality, then shrink dimensions
+    if (quality > 0.62) quality -= 0.1;
+    else side = Math.round(side * 0.8);
+  }
+  throw new Error('Image too large');
 }
 
 export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalProps) {

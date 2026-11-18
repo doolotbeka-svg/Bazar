@@ -6,6 +6,8 @@ import { createStorage, IMAGE_ROUTE_PREFIX, type StoreData } from './storage.ts'
 
 const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
 const LOCATION_IDS = new Set<string>(KYRGYZSTAN_LOCATIONS.map((l) => l.id));
+// The client compresses photos to <=300k chars; allow headroom but reject raw camera files
+const MAX_IMAGE_DATA_URL_CHARS = 600_000;
 
 /** Safely read a trimmed string from untrusted JSON input. */
 function str(value: unknown): string {
@@ -140,7 +142,7 @@ export function createApiApp() {
       for (const [i, img] of rawImages.entries()) {
         if (img.startsWith('/src/assets/')) {
           images.push(img);
-        } else if (img.startsWith('data:image/')) {
+        } else if (img.startsWith('data:image/') && img.length <= MAX_IMAGE_DATA_URL_CHARS) {
           try {
             images.push(await storage.saveImage(id, i, img));
           } catch (err) {
