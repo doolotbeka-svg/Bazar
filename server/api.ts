@@ -1,9 +1,19 @@
+import { randomInt } from 'crypto';
 import express from 'express';
 import { MARKETPLACE_CATEGORIES } from '../src/data/categories.ts';
 import { KYRGYZSTAN_LOCATIONS } from '../src/data/locations.ts';
 import type { CategoryId, Listing, PromoteTier, UserProfile } from '../src/types/marketplace.ts';
 import { createStorage, IMAGE_ROUTE_PREFIX, type StoreData } from './storage.ts';
-import { createListingKey, createSessionToken, verifyListingKey, verifySessionToken } from './auth.ts';
+import {
+  createListingKey,
+  createSessionToken,
+  hashOtp,
+  otpMatches,
+  verifyListingKey,
+  verifySessionToken
+} from './auth.ts';
+import { getGoogleClientId, verifyGoogleIdToken } from './google.ts';
+import { createSmsSender, isSmsDemoMode } from './sms.ts';
 
 const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
 const LOCATION_IDS = new Set<string>(KYRGYZSTAN_LOCATIONS.map((l) => l.id));
@@ -285,51 +295,117 @@ export function createApiApp() {
     })
   );
 
-  // Phone SMS verification (demo OTP flow with 1234)
-  app.post('/api/auth/send-otp', (req, res) => {
-    const phone = String(req.body?.phone || '').trim();
-    if (!phone) {
-      res.status(400).json({ error: 'Phone required' });
-      return;
-    }
-    res.json({ sent: true, phone });
+  /* ---------------- sign-in ---------------- */
+
+  const sms = createSmsSender();
+  const OTP_TTL_MS = 5 * 60 * 1000;
+  const OTP_RESEND_MS = 60 * 1000;
+  const OTP_MAX_ATTEMPTS = 5;
+  const OTP_MAX_PER_DAY = 5;
+
+  /** Normalized Kyrgyz mobile number (996XXXXXXXXX) or null. */
+  const kgPhoneDigits = (value: unknown): string | null => {
+    const digits = str(value).replace(/\D/g, '');
+    return /^996\d{9}$/.test(digits) ? digits : null;
+  };
+
+  const formatPhone = (d: string) => `+${d.slice(0, 3)} (${d.slice(3, 6)}) ${d.slice(6, 8)}-${d.slice(8, 10)}-${d.slice(10)}`;
+
+  // What the sign-in screen can offer
+  app.get('/api/auth/config', (_req, res) => {
+    res.json({ googleClientId: getGoogleClientId(), smsDemo: isSmsDemoMode(sms) });
   });
+
+  app.post(
+    '/api/auth/send-otp',
+    wrap(async (req, res) => {
+      const digits = kgPhoneDigits(req.body?.phone);
+      if (!digits) throw new HttpError(400, 'Invalid phone number');
+
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const now = Date.now();
+      const today = new Date(now).toISOString().slice(0, 10);
+
+      await mutate((data) => {
+        const prev = data.otps[digits];
+        if (prev && now - prev.lastSentAt < OTP_RESEND_MS) {
+          throw new HttpError(429, 'Please wait before requesting a new code');
+        }
+        const sentToday = prev && prev.day === today ? prev.sentToday : 0;
+        if (sentToday >= OTP_MAX_PER_DAY) throw new HttpError(429, 'Too many codes today');
+        // Drop expired records so the store does not grow forever
+        for (const [phone, rec] of Object.entries(data.otps)) {
+          if (rec.expiresAt < now && rec.day !== today) delete data.otps[phone];
+        }
+        data.otps[digits] = {
+          codeHash: hashOtp(digits, code),
+          expiresAt: now + OTP_TTL_MS,
+          attempts: 0,
+          lastSentAt: now,
+          day: today,
+          sentToday: sentToday + 1
+        };
+      });
+
+      if (sms) {
+        await sms.send(digits, `TezBazar: ваш код ${code}. Никому его не сообщайте.`);
+        res.json({ sent: true });
+      } else {
+        // Demo mode: no SMS provider yet, so the code is shown on screen
+        res.json({ sent: true, demoCode: code });
+      }
+    })
+  );
 
   app.post(
     '/api/auth/verify-otp',
     wrap(async (req, res) => {
-      const phone = String(req.body?.phone || '').trim();
-      const code = String(req.body?.code || '').trim();
-      if (code !== '1234') throw new HttpError(401, 'Invalid OTP code');
-      const cleanDigits = phone.replace(/\D/g, '');
-      const userId = `phone-${cleanDigits}`;
-      const result = await mutate((data) => {
+      const digits = kgPhoneDigits(req.body?.phone);
+      const code = str(req.body?.code);
+      if (!digits || !/^\d{6}$/.test(code)) throw new HttpError(400, 'Invalid phone or code');
+
+      const outcome = await mutate((data) => {
+        const rec = data.otps[digits];
+        if (!rec || rec.expiresAt < Date.now() || rec.attempts >= OTP_MAX_ATTEMPTS) {
+          return { error: 'expired' as const };
+        }
+        if (!otpMatches(digits, code, rec.codeHash)) {
+          rec.attempts += 1;
+          return { error: 'wrong' as const };
+        }
+        // One-time: the code cannot be used again (keep limits for the day)
+        rec.expiresAt = 0;
+        const userId = `phone-${digits}`;
         const user: UserProfile = data.users[userId] || {
           id: userId,
-          name: `Колдонуучу ${cleanDigits.slice(-4)}`,
-          phone,
+          name: `Колдонуучу ${digits.slice(-4)}`,
+          phone: formatPhone(digits),
           authMethod: 'phone',
           joinedAt: String(new Date().getFullYear())
         };
         data.users[userId] = user;
         return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
       });
-      res.json(result);
+
+      if ('error' in outcome) {
+        throw new HttpError(401, outcome.error === 'expired' ? 'Code expired, request a new one' : 'Invalid code');
+      }
+      res.json(outcome);
     })
   );
 
   app.post(
     '/api/auth/google',
     wrap(async (req, res) => {
-      const email = String(req.body?.email || '').trim();
-      const name = String(req.body?.name || 'Google User').trim();
-      if (!email) throw new HttpError(400, 'Email required');
-      const userId = `google-${email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      if (!getGoogleClientId()) throw new HttpError(404, 'Google sign-in is not configured');
+      const identity = await verifyGoogleIdToken(str(req.body?.credential));
+      if (!identity) throw new HttpError(401, 'Invalid Google credential');
+      const userId = `google-${identity.sub}`;
       const result = await mutate((data) => {
         const user: UserProfile = data.users[userId] || {
           id: userId,
-          name,
-          email,
+          name: identity.name.slice(0, 80),
+          email: identity.email,
           authMethod: 'google',
           joinedAt: String(new Date().getFullYear())
         };

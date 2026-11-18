@@ -60,6 +60,17 @@ export function verifySessionToken(token: string | undefined | null): string | n
   }
 }
 
+/* ---------------- SMS login codes ---------------- */
+
+/** Codes are stored as an HMAC, so a leaked store does not reveal live codes. */
+export function hashOtp(phoneDigits: string, code: string): string {
+  return sign('otp', `${phoneDigits}:${code}`);
+}
+
+export function otpMatches(phoneDigits: string, code: string, codeHash: string): boolean {
+  return safeEqual(hashOtp(phoneDigits, code), codeHash);
+}
+
 /* ---------------- per-listing manage keys ---------------- */
 
 export function createListingKey(listingId: string): string {

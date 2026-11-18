@@ -5,10 +5,22 @@ import { del, get, put } from '@vercel/blob';
 import { SEED_LISTINGS } from '../src/data/seedListings.ts';
 import type { Listing, UserProfile } from '../src/types/marketplace.ts';
 
+/** Pending SMS login code for one phone number (the code itself is stored only as an HMAC). */
+export interface OtpRecord {
+  codeHash: string;
+  expiresAt: number;
+  attempts: number;
+  lastSentAt: number;
+  /** YYYY-MM-DD and number of SMS sent that day, for the daily limit */
+  day: string;
+  sentToday: number;
+}
+
 export interface StoreData {
   listings: Listing[];
   favoritesByUser: Record<string, string[]>;
   users: Record<string, UserProfile>;
+  otps: Record<string, OtpRecord>;
 }
 
 export interface StoredImage {
@@ -30,7 +42,7 @@ export interface Storage {
 export const IMAGE_ROUTE_PREFIX = '/api/images/';
 
 function emptyStore(): StoreData {
-  return { listings: SEED_LISTINGS, favoritesByUser: {}, users: {} };
+  return { listings: SEED_LISTINGS, favoritesByUser: {}, users: {}, otps: {} };
 }
 
 function normalize(parsed: Partial<StoreData> | null | undefined): StoreData {
@@ -40,7 +52,8 @@ function normalize(parsed: Partial<StoreData> | null | undefined): StoreData {
     // (e.g. every listing was deleted) and must not bring the demo data back.
     listings: Array.isArray(parsed.listings) ? parsed.listings : SEED_LISTINGS,
     favoritesByUser: parsed.favoritesByUser || {},
-    users: parsed.users || {}
+    users: parsed.users || {},
+    otps: parsed.otps || {}
   };
 }
 
