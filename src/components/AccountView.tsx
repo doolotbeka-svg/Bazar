@@ -176,7 +176,7 @@ export function AccountView({
               {t('account.tabFavorites')}
             </h1>
             {favoriteListings.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-6">
                 {favoriteListings.map((item) => (
                   <ListingCard
                     key={item.id}
@@ -255,21 +255,21 @@ export function AccountView({
                       value={phone}
                       onChange={(e) => setPhone(formatKyrgyzPhoneInput(e.target.value))}
                       placeholder="+996 (700) 12-34-56"
-                      className="w-full h-11 pl-10 pr-4 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-emerald-600"
+                      className="w-full h-11 pl-10 pr-4 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 tabular-nums focus:outline-none focus:border-brand-600"
                     />
                   </div>
                 </div>
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+                  className="w-full min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
                 >
                   {t('account.sendSms')}
                 </button>
               </form>
             ) : (
               <form onSubmit={handleVerifyOtp} className="mt-5 space-y-4">
-                <p className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                <p className="text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-xl p-3">
                   {t('account.otpHint')}
                 </p>
                 <div>
@@ -283,13 +283,13 @@ export function AccountView({
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="1234"
-                    className="w-full h-11 px-4 bg-white border border-slate-300 rounded-xl text-center text-lg font-bold tracking-[0.4em] text-slate-900 tabular-nums focus:outline-none focus:border-emerald-600"
+                    className="w-full h-11 px-4 bg-white border border-slate-300 rounded-xl text-center text-lg font-bold tracking-[0.4em] text-slate-900 tabular-nums focus:outline-none focus:border-brand-600"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+                  className="w-full min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
                 >
                   {t('account.verifyBtn')}
                 </button>
@@ -316,7 +316,7 @@ export function AccountView({
                   value={googleName}
                   onChange={(e) => setGoogleName(e.target.value)}
                   placeholder={t('postAd.sellerNamePlaceholder')}
-                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
                 />
               </div>
               <div>
@@ -328,7 +328,7 @@ export function AccountView({
                   value={googleEmail}
                   onChange={(e) => setGoogleEmail(e.target.value)}
                   placeholder="name@gmail.com"
-                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
                 />
               </div>
               <button
@@ -368,7 +368,7 @@ export function AccountView({
       {/* User Summary Bar */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-full bg-emerald-600 text-white font-bold text-lg flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-full bg-brand-600 text-white font-bold text-lg flex items-center justify-center shrink-0">
             {user.name.charAt(0).toUpperCase()}
           </div>
           <div>
@@ -383,7 +383,7 @@ export function AccountView({
           <button
             type="button"
             onClick={onOpenPostAd}
-            className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[42px] px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>{t('nav.postAd')}</span>
@@ -456,7 +456,7 @@ export function AccountView({
               <button
                 type="button"
                 onClick={onOpenPostAd}
-                className="mt-4 min-h-[42px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
+                className="mt-4 min-h-[42px] px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>{t('nav.postAd')}</span>
@@ -498,7 +498,7 @@ export function AccountView({
                       </div>
                       <h3
                         onClick={() => onSelectListing(item)}
-                        className="mt-1 text-sm font-semibold text-slate-800 line-clamp-2 cursor-pointer hover:text-emerald-700"
+                        className="mt-1 text-sm font-semibold text-slate-800 line-clamp-2 cursor-pointer hover:text-brand-700"
                       >
                         {getLocalizedTitle(item, lang)}
                       </h3>
@@ -515,7 +515,7 @@ export function AccountView({
                         }
                         className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 flex items-center gap-1.5 cursor-pointer"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-brand-600" />
                         <span>
                           {item.status === 'active'
                             ? t('account.markSold')
@@ -552,7 +552,7 @@ export function AccountView({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-6">
               {favoriteListings.map((item) => (
                 <ListingCard
                   key={item.id}
@@ -588,13 +588,13 @@ export function AccountView({
                 <p className="mt-1.5 text-xs text-slate-500">{t('account.vipPlanDesc')}</p>
               </div>
 
-              <div className="p-4 rounded-xl bg-white border border-emerald-200">
+              <div className="p-4 rounded-xl bg-white border border-brand-200">
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
-                    <ArrowUpCircle className="w-4.5 h-4.5 text-emerald-600" />
+                    <ArrowUpCircle className="w-4.5 h-4.5 text-brand-600" />
                     {t('account.topPlan')}
                   </span>
-                  <span className="text-sm font-extrabold text-emerald-700 tabular-nums">
+                  <span className="text-sm font-extrabold text-brand-700 tabular-nums">
                     {t('account.topPrice')}
                   </span>
                 </div>
@@ -604,7 +604,7 @@ export function AccountView({
           </div>
 
           {promoteFeedback && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold">
+            <div className="p-3.5 rounded-xl bg-brand-50 border border-brand-200 text-brand-800 text-sm font-semibold">
               {promoteFeedback}
             </div>
           )}
@@ -615,7 +615,7 @@ export function AccountView({
               <button
                 type="button"
                 onClick={onOpenPostAd}
-                className="mt-3 min-h-[42px] px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                className="mt-3 min-h-[42px] px-5 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>{t('nav.postAd')}</span>
@@ -661,8 +661,8 @@ export function AccountView({
                       onClick={() => handlePromoteClick(item.id, 'top')}
                       className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
                         item.promoteTier === 'top'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-emerald-50 border border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-brand-50 border border-brand-300 text-brand-800 hover:bg-brand-100'
                       }`}
                     >
                       <ArrowUpCircle className="w-3.5 h-3.5" />
