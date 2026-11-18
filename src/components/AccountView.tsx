@@ -112,6 +112,14 @@ export function AccountView({
         );
         return;
       }
+      if (res.status >= 500) {
+        setAuthError(
+          lang === 'kg'
+            ? 'SMS жөнөтүлгөн жок. Бир аздан кийин кайра аракет кылыңыз.'
+            : 'Не удалось отправить SMS. Попробуйте чуть позже.'
+        );
+        return;
+      }
       if (!res.ok) throw new Error('send-otp failed');
       const data = (await res.json()) as { demoCode?: string };
       setDemoCode(data.demoCode || null);

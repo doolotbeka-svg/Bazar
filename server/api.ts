@@ -348,12 +348,24 @@ export function createApiApp() {
       });
 
       if (sms) {
-        await sms.send(digits, `AlMart: ваш код ${code}. Никому его не сообщайте.`);
-        res.json({ sent: true });
-      } else {
-        // Demo mode: no SMS provider yet, so the code is shown on screen
-        res.json({ sent: true, demoCode: code });
+        try {
+          await sms.send(digits, `AlMart: ваш код ${code}. Никому его не сообщайте.`);
+        } catch (err) {
+          console.error(err);
+          // Not delivered: cancel this code and give back the resend/daily allowance
+          await mutate((data) => {
+            const rec = data.otps[digits];
+            if (rec && rec.lastSentAt === now) {
+              rec.expiresAt = 0;
+              rec.lastSentAt = 0;
+              rec.sentToday = Math.max(0, rec.sentToday - 1);
+            }
+          }).catch(() => undefined);
+          throw new HttpError(502, 'SMS could not be sent');
+        }
       }
+      // Demo / gateway test mode: nothing reaches the phone, so the code is shown on screen
+      res.json(isSmsDemoMode(sms) ? { sent: true, demoCode: code } : { sent: true });
     })
   );
 
