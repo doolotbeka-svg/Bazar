@@ -20,6 +20,7 @@ import { ListingPage } from './components/ListingPage';
 import { FiltersSidebar, SearchFilters } from './components/FiltersSidebar';
 import { PostAdModal } from './components/PostAdModal';
 import { AccountView } from './components/AccountView';
+import { authHeaders, getSessionToken, removeAdKey, setSessionToken } from './lib/session';
 
 const USER_STORAGE_KEY = 'tezbazar_user';
 const FAVORITES_STORAGE_KEY = 'tezbazar_favorites';
@@ -86,8 +87,9 @@ export default function App() {
 
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
+      // A profile without a session token (saved before sign-in tokens existed) must sign in again
       const saved = localStorage.getItem(USER_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as UserProfile) : null;
+      return saved && getSessionToken() ? (JSON.parse(saved) as UserProfile) : null;
     } catch {
       return null;
     }
@@ -143,8 +145,8 @@ export default function App() {
     if (currentUser) {
       fetch('/api/favorites/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, favorites: nextFavs })
+        headers: authHeaders(),
+        body: JSON.stringify({ favorites: nextFavs })
       }).catch(() => {});
     }
   };
@@ -249,28 +251,62 @@ export default function App() {
     setListings((prev) => prev.filter((item) => item.id !== id));
     persistOwnAds(ownAdIds.filter((item) => item !== id));
     if (selectedListing?.id === id) closeListingSilently();
-    fetch(`/api/listings/${id}`, { method: 'DELETE' }).catch(() => {});
+    sendListingChange(`/api/listings/${id}`, { method: 'DELETE', headers: authHeaders(id, false) }, () =>
+      removeAdKey(id)
+    );
   };
+
+  /**
+   * Send an owner-only change. The UI is updated optimistically; if the server
+   * refuses it (not the owner, session expired) the real state is reloaded.
+   */
+  const sendListingChange = (url: string, init: RequestInit, onSuccess?: () => void) => {
+    fetch(url, init)
+      .then((res) => {
+        if (res.ok) {
+          onSuccess?.();
+          return;
+        }
+        if (res.status === 401 || res.status === 403) {
+          window.alert(
+            lang === 'kg'
+              ? 'Бул жарыяны өзгөртүүгө укугуңуз жок. Аккаунтка кайра кириңиз.'
+              : 'Нет прав на изменение этого объявления. Войдите в аккаунт заново.'
+          );
+        }
+        return reloadListings();
+      })
+      .catch(() => reloadListings());
+  };
+
+  const reloadListings = () =>
+    fetch('/api/listings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { listings?: Listing[] } | null) => {
+        if (data && Array.isArray(data.listings)) setListings(data.listings);
+      })
+      .catch(() => {});
 
   const handleToggleStatus = (id: string, nextStatus: 'active' | 'sold') => {
     setListings((prev) => prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)));
-    fetch(`/api/listings/${id}/status`, {
+    sendListingChange(`/api/listings/${id}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(id),
       body: JSON.stringify({ status: nextStatus })
-    }).catch(() => {});
+    });
   };
 
   const handlePromoteListing = (id: string, tier: PromoteTier) => {
     setListings((prev) => prev.map((item) => (item.id === id ? { ...item, promoteTier: tier } : item)));
-    fetch(`/api/listings/${id}/promote`, {
+    sendListingChange(`/api/listings/${id}/promote`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(id),
       body: JSON.stringify({ tier })
-    }).catch(() => {});
+    });
   };
 
-  const handleLogin = (loggedInUser: UserProfile, serverFavorites: string[]) => {
+  const handleLogin = (loggedInUser: UserProfile, serverFavorites: string[], token: string) => {
+    setSessionToken(token);
     setUser(loggedInUser);
     try {
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
@@ -281,6 +317,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    setSessionToken(null);
     setUser(null);
     try {
       localStorage.removeItem(USER_STORAGE_KEY);

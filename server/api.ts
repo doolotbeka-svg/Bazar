@@ -3,6 +3,7 @@ import { MARKETPLACE_CATEGORIES } from '../src/data/categories.ts';
 import { KYRGYZSTAN_LOCATIONS } from '../src/data/locations.ts';
 import type { CategoryId, Listing, PromoteTier, UserProfile } from '../src/types/marketplace.ts';
 import { createStorage, IMAGE_ROUTE_PREFIX, type StoreData } from './storage.ts';
+import { createListingKey, createSessionToken, verifyListingKey, verifySessionToken } from './auth.ts';
 
 const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
 const LOCATION_IDS = new Set<string>(KYRGYZSTAN_LOCATIONS.map((l) => l.id));
@@ -29,6 +30,25 @@ class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+/** User id from `Authorization: Bearer <session token>`, or null. */
+function sessionUserId(req: express.Request): string | null {
+  const header = req.get('authorization') || '';
+  const match = /^Bearer\s+(\S+)$/i.exec(header);
+  return match ? verifySessionToken(match[1]) : null;
+}
+
+/**
+ * The caller may change a listing if they are signed in as its seller,
+ * or present the listing's manage key (returned once when it was posted).
+ */
+function assertCanManage(req: express.Request, listing: Listing) {
+  const uid = sessionUserId(req);
+  if (uid && listing.sellerId === uid) return;
+  const key = req.get('x-listing-key');
+  if (verifyListingKey(listing.id, key)) return;
+  throw new HttpError(uid || key ? 403 : 401, 'Not allowed to manage this listing');
 }
 
 /** Express app with all /api routes. Used by the local server and the Vercel function. */
@@ -132,6 +152,8 @@ export function createApiApp() {
         throw new HttpError(400, 'Price required unless negotiable');
       }
 
+      // The seller is whoever is signed in; a client-supplied sellerId is ignored
+      const sellerId = sessionUserId(req) || 'guest';
       const id = `kg-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
       // Upload photos first (outside the store lock); keep only the ones that succeed
@@ -166,7 +188,7 @@ export function createApiApp() {
         phone: phoneIn,
         hasWhatsapp: body.hasWhatsapp !== false,
         sellerName: (str(body.sellerName) || 'Сатуучу').slice(0, 80),
-        sellerId: str(body.sellerId) || 'guest',
+        sellerId,
         sellerSince: str(body.sellerSince) || String(new Date().getFullYear()),
         createdAt: new Date().toISOString(),
         views: 1,
@@ -177,7 +199,8 @@ export function createApiApp() {
       await mutate((data) => {
         data.listings.unshift(newListing);
       });
-      res.status(201).json({ listing: newListing });
+      // The manage key is only ever sent here, to the poster
+      res.status(201).json({ listing: newListing, manageKey: createListingKey(id) });
     })
   );
 
@@ -200,6 +223,7 @@ export function createApiApp() {
       const status = req.body?.status === 'sold' ? 'sold' : 'active';
       const listing = await mutate((data) => {
         const found = findOr404(data, req.params.id);
+        assertCanManage(req, found);
         found.status = status;
         return found;
       });
@@ -216,6 +240,7 @@ export function createApiApp() {
       }
       const listing = await mutate((data) => {
         const found = findOr404(data, req.params.id);
+        assertCanManage(req, found);
         found.promoteTier = tier;
         return found;
       });
@@ -228,6 +253,7 @@ export function createApiApp() {
     wrap(async (req, res) => {
       const removed = await mutate((data) => {
         const found = findOr404(data, req.params.id);
+        assertCanManage(req, found);
         data.listings = data.listings.filter((item) => item !== found);
         return found;
       });
@@ -286,7 +312,7 @@ export function createApiApp() {
           joinedAt: String(new Date().getFullYear())
         };
         data.users[userId] = user;
-        return { user, favorites: data.favoritesByUser[userId] || [] };
+        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
       });
       res.json(result);
     })
@@ -308,7 +334,7 @@ export function createApiApp() {
           joinedAt: String(new Date().getFullYear())
         };
         data.users[userId] = user;
-        return { user, favorites: data.favoritesByUser[userId] || [] };
+        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
       });
       res.json(result);
     })
@@ -317,11 +343,11 @@ export function createApiApp() {
   app.post(
     '/api/favorites/sync',
     wrap(async (req, res) => {
-      const userId = String(req.body?.userId || '').trim();
+      const userId = sessionUserId(req);
+      if (!userId) throw new HttpError(401, 'Sign in required');
       const favorites: string[] = Array.isArray(req.body?.favorites)
         ? (req.body.favorites as unknown[]).filter((f): f is string => typeof f === 'string').slice(0, 500)
         : [];
-      if (!userId) throw new HttpError(400, 'userId required');
       await mutate((data) => {
         data.favoritesByUser[userId] = favorites;
       });
