@@ -250,8 +250,9 @@ export function createApiApp() {
       const image = await storage.getImage(pathname);
       if (!image) throw new HttpError(404, 'Not found');
       res.setHeader('Content-Type', image.contentType);
-      // Image paths are unique per listing and never change
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      // Browsers may cache for a day; the Vercel CDN only for an hour, so photos
+      // of a deleted listing stop being served soon after deletion.
+      res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=3600');
       image.stream.on('error', () => res.destroy()).pipe(res);
     })
   );
