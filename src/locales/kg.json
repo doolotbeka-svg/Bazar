@@ -1,5 +1,5 @@
 {
-  "brand": "TezBazar",
+  "brand": "AlMart",
   "nav": {
     "home": "Башкы бет",
     "catalog": "Жарыялар",
@@ -69,7 +69,7 @@
     "call": "Чалуу",
     "copiedPhone": "Номер көчүрүлдү",
     "whatsapp": "WhatsAppка жазуу",
-    "whatsappMessage": "Саламатсызбы! TezBazar сайтындагы жарыяңыз боюнча жазып жатам:",
+    "whatsappMessage": "Саламатсызбы! AlMart сайтындагы жарыяңыз боюнча жазып жатам:",
     "addToFavorites": "Тандалмаларга",
     "inFavorites": "Тандалмаларда",
     "photos": "сүрөт",
@@ -165,7 +165,7 @@
     "about": "Кыргызстандын бүткүл аймагы үчүн ыңгайлуу жарыялар тактасы.",
     "regionsTitle": "Аймактар",
     "categoriesTitle": "Популярдуу бөлүмдөр",
-    "copyright": "© 2026 TezBazar. Бардык укуктар корголгон."
+    "copyright": "© 2026 AlMart. Бардык укуктар корголгон."
   },
   "home": {
     "recommendations": "Сиз үчүн сунуштар",

@@ -348,7 +348,7 @@ export function createApiApp() {
       });
 
       if (sms) {
-        await sms.send(digits, `TezBazar: ваш код ${code}. Никому его не сообщайте.`);
+        await sms.send(digits, `AlMart: ваш код ${code}. Никому его не сообщайте.`);
         res.json({ sent: true });
       } else {
         // Demo mode: no SMS provider yet, so the code is shown on screen
