@@ -17,7 +17,7 @@ export const CATEGORY_ICONS: Record<CategoryId, IconType> = {
 
 /** Accent colour of the illustration blob on each category tile. */
 export const CATEGORY_ACCENTS: Record<CategoryId, string> = {
-  transport: 'bg-sky-200 text-sky-700',
+  transport: 'bg-cyan-200 text-cyan-800',
   real_estate: 'bg-amber-200 text-amber-700',
   electronics: 'bg-violet-200 text-violet-700',
   home_garden: 'bg-lime-200 text-lime-700',

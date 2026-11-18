@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
-/* Classifieds palette: blue for actions/links, green for contact, warm gray tiles */
+/* TezBazar palette: deep teal for actions/links, terracotta for contact, warm sand surfaces */
 @theme {
-  --color-brand-50: #ebf6ff;
-  --color-brand-100: #d4ecff;
-  --color-brand-200: #a8d8ff;
-  --color-brand-300: #70bfff;
-  --color-brand-400: #36a3ff;
-  --color-brand-500: #0a8cff;
-  --color-brand-600: #0077e6;
-  --color-brand-700: #0062bd;
-  --color-brand-800: #004f99;
-  --color-brand-900: #003d75;
+  --color-brand-50: #eefaf7;
+  --color-brand-100: #d3f1ea;
+  --color-brand-200: #a9e2d6;
+  --color-brand-300: #72cbbb;
+  --color-brand-400: #3aab99;
+  --color-brand-500: #0f8a78;
+  --color-brand-600: #0c7466;
+  --color-brand-700: #0d5d53;
+  --color-brand-800: #0e4b44;
+  --color-brand-900: #0d3e39;
 
-  --color-go-500: #00b956;
-  --color-go-600: #00a24b;
-  --color-go-700: #008a40;
+  --color-go-500: #d4541c;
+  --color-go-600: #b84616;
+  --color-go-700: #963912;
 
-  --color-tile: #f2f1f0;
-  --color-tile-hover: #e9e8e6;
+  --color-tile: #f5f1ea;
+  --color-tile-hover: #ece5d9;
 }
 
 @layer base {
@@ -30,7 +30,7 @@
   body {
     font-family: var(--font-body);
     background-color: #ffffff;
-    color: #1a1a1a;
+    color: #1f2421;
   }
 
   h1, h2, h3, h4, .font-display {

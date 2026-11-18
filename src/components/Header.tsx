@@ -131,8 +131,8 @@ export function Header({
           className="shrink-0 font-display text-[22px] md:text-[26px] font-extrabold tracking-tight cursor-pointer leading-none"
           aria-label={t('nav.home')}
         >
-          <span className="text-slate-900">Tez</span>
-          <span className="text-brand-500">Bazar</span>
+          <span className="text-brand-800">Tez</span>
+          <span className="text-go-500">Bazar</span>
         </button>
 
         <div className="md:hidden ml-auto">{langSwitch}</div>
