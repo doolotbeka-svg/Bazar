@@ -17,6 +17,7 @@ import { Listing, PromoteTier, UserProfile } from '../types/marketplace';
 import { formatKyrgyzPhoneInput, isValidKyrgyzPhone, getLocalizedTitle, formatPrice } from '../utils/format';
 import { getLocationName } from '../data/locations';
 import { ListingCard } from './ListingCard';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface AccountViewProps {
   user: UserProfile | null;
@@ -57,11 +58,25 @@ export function AccountView({
   const [phone, setPhone] = useState('+996 (');
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const [demoCode, setDemoCode] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [googleEmail, setGoogleEmail] = useState('');
-  const [googleName, setGoogleName] = useState('');
+  // Which sign-in methods the server has configured
+  const [authConfig, setAuthConfig] = useState<{ googleClientId: string | null; smsDemo: boolean } | null>(null);
+  useEffect(() => {
+    if (user) return;
+    let active = true;
+    fetch('/api/auth/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (active && cfg) setAuthConfig(cfg);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   const [promoteFeedback, setPromoteFeedback] = useState<string | null>(null);
   const promoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,8 +90,8 @@ export function AccountView({
   const networkError =
     lang === 'kg' ? 'Тармак катасы. Кайра аракет кылыңыз.' : 'Ошибка сети. Попробуйте ещё раз.';
 
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendOtp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setAuthError(null);
     if (!isValidKyrgyzPhone(phone)) {
       setAuthError(t('postAd.validationPhone'));
@@ -89,7 +104,18 @@ export function AccountView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone })
       });
+      if (res.status === 429) {
+        setAuthError(
+          lang === 'kg'
+            ? 'Код жакында эле жөнөтүлгөн. Бир мүнөттөн кийин кайра аракет кылыңыз (күнүнө 5 жолудан ашпайт).'
+            : 'Код уже отправлен недавно. Повторите через минуту (не больше 5 раз в день).'
+        );
+        return;
+      }
       if (!res.ok) throw new Error('send-otp failed');
+      const data = (await res.json()) as { demoCode?: string };
+      setDemoCode(data.demoCode || null);
+      setOtpCode('');
       setOtpSent(true);
     } catch {
       setAuthError(networkError);
@@ -101,6 +127,10 @@ export function AccountView({
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    if (!/^\d{6}$/.test(otpCode)) {
+      setAuthError(lang === 'kg' ? '6 орундуу кодду жазыңыз' : 'Введите 6-значный код');
+      return;
+    }
     setAuthLoading(true);
     try {
       const res = await fetch('/api/auth/verify-otp', {
@@ -109,7 +139,17 @@ export function AccountView({
         body: JSON.stringify({ phone, code: otpCode })
       });
       if (!res.ok) {
-        setAuthError(lang === 'kg' ? 'Код туура эмес (1234 жазыңыз)' : 'Неверный код (введите 1234)');
+        const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+        const expired = /expired/i.test(error || '');
+        setAuthError(
+          expired
+            ? lang === 'kg'
+              ? 'Коддун мөөнөтү бүттү же аракеттер көп болду. Жаңы код алыңыз.'
+              : 'Код истёк или было слишком много попыток. Запросите новый код.'
+            : lang === 'kg'
+              ? 'Код туура эмес'
+              : 'Неверный код'
+        );
         return;
       }
       const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
@@ -121,26 +161,20 @@ export function AccountView({
     }
   };
 
-  const handleGoogleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleCredential = async (credential: string) => {
     setAuthError(null);
-    const email = googleEmail.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setAuthError(lang === 'kg' ? 'Туура email жазыңыз' : 'Введите корректный email');
-      return;
-    }
     setAuthLoading(true);
     try {
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name: googleName.trim() || email.split('@')[0] })
+        body: JSON.stringify({ credential })
       });
       if (!res.ok) throw new Error('google auth failed');
       const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
       onLogin(data.user, data.favorites || [], data.token);
     } catch {
-      setAuthError(networkError);
+      setAuthError(lang === 'kg' ? 'Google аркылуу кирүү ишке ашкан жок' : 'Не удалось войти через Google');
     } finally {
       setAuthLoading(false);
     }
@@ -269,9 +303,18 @@ export function AccountView({
               </form>
             ) : (
               <form onSubmit={handleVerifyOtp} className="mt-5 space-y-4">
-                <p className="text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-xl p-3">
-                  {t('account.otpHint')}
-                </p>
+                {demoCode ? (
+                  <p className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    {lang === 'kg'
+                      ? 'Демо-режим: SMS азырынча жөнөтүлбөйт. Сиздин код: '
+                      : 'Демо-режим: SMS пока не отправляются. Ваш код: '}
+                    <b className="tabular-nums tracking-widest">{demoCode}</b>
+                  </p>
+                ) : (
+                  <p className="text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-xl p-3">
+                    {t('account.otpHint')}
+                  </p>
+                )}
                 <div>
                   <label className="block text-sm font-semibold text-slate-800 mb-1.5">
                     {t('account.otpLabel')}
@@ -279,10 +322,11 @@ export function AccountView({
                   <input
                     type="text"
                     inputMode="numeric"
-                    maxLength={4}
+                    maxLength={6}
+                    autoComplete="one-time-code"
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1234"
+                    placeholder="••••••"
                     className="w-full h-11 px-4 bg-white border border-slate-300 rounded-xl text-center text-lg font-bold tracking-[0.4em] text-slate-900 tabular-nums focus:outline-none focus:border-brand-600"
                   />
                 </div>
@@ -295,9 +339,18 @@ export function AccountView({
                 </button>
                 <button
                   type="button"
+                  disabled={authLoading}
+                  onClick={() => handleSendOtp()}
+                  className="w-full text-xs font-medium text-brand-700 hover:text-brand-800 cursor-pointer py-1"
+                >
+                  {lang === 'kg' ? 'Кодду кайра жөнөтүү' : 'Отправить код ещё раз'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     setOtpSent(false);
                     setOtpCode('');
+                    setDemoCode(null);
                   }}
                   className="w-full text-xs font-medium text-slate-500 hover:text-slate-800 cursor-pointer py-1"
                 >
@@ -306,57 +359,27 @@ export function AccountView({
               </form>
             )
           ) : (
-            <form onSubmit={handleGoogleSignIn} className="mt-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t('postAd.sellerNameLabel')}
-                </label>
-                <input
-                  type="text"
-                  value={googleName}
-                  onChange={(e) => setGoogleName(e.target.value)}
-                  placeholder={t('postAd.sellerNamePlaceholder')}
-                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Gmail
-                </label>
-                <input
-                  type="email"
-                  value={googleEmail}
-                  onChange={(e) => setGoogleEmail(e.target.value)}
-                  placeholder="name@gmail.com"
-                  className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-brand-600"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={authLoading}
-                className="w-full min-h-[44px] bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2.5 cursor-pointer"
-              >
-                <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+            <div className="mt-5 space-y-3">
+              {authConfig?.googleClientId ? (
+                <>
+                  <GoogleSignInButton
+                    clientId={authConfig.googleClientId}
+                    lang={lang}
+                    onCredential={handleGoogleCredential}
+                    onError={() => setAuthError(networkError)}
                   />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                  />
-                </svg>
-                <span>{t('account.googleBtn')}</span>
-              </button>
-            </form>
+                  {authLoading && (
+                    <p className="text-center text-xs text-slate-500">{lang === 'kg' ? 'Текшерилүүдө…' : 'Проверяем…'}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-3.5">
+                  {lang === 'kg'
+                    ? 'Google аркылуу кирүү жакында иштейт. Азырынча телефон номери менен кириңиз.'
+                    : 'Вход через Google скоро заработает. Пока войдите по номеру телефона.'}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
