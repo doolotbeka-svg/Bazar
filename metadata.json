@@ -1,5 +1,5 @@
 {
-  "name": "TezBazar — Кыргызстандын жарыялар тактасы",
+  "name": "AlMart — Кыргызстандын жарыялар тактасы",
   "description": "Кыргызстан үчүн заманбап купи-продай жарыялар тактасы (кыргызча жана орусча).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

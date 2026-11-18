@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* TezBazar palette: deep teal for actions/links, terracotta for contact, warm sand surfaces */
+/* AlMart palette: deep teal for actions/links, terracotta for contact, warm sand surfaces */
 @theme {
   --color-brand-50: #eefaf7;
   --color-brand-100: #d3f1ea;

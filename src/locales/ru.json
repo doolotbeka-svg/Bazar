@@ -1,5 +1,5 @@
 {
-  "brand": "TezBazar",
+  "brand": "AlMart",
   "nav": {
     "home": "Главная",
     "catalog": "Объявления",
@@ -69,7 +69,7 @@
     "call": "Позвонить",
     "copiedPhone": "Номер скопирован",
     "whatsapp": "Написать в WhatsApp",
-    "whatsappMessage": "Здравствуйте! Пишу по вашему объявлению на TezBazar:",
+    "whatsappMessage": "Здравствуйте! Пишу по вашему объявлению на AlMart:",
     "addToFavorites": "В избранное",
     "inFavorites": "В избранном",
     "photos": "фото",
@@ -165,7 +165,7 @@
     "about": "Удобная доска объявлений для всех городов и областей Кыргызстана.",
     "regionsTitle": "Регионы",
     "categoriesTitle": "Популярные разделы",
-    "copyright": "© 2026 TezBazar. Все права защищены."
+    "copyright": "© 2026 AlMart. Все права защищены."
   },
   "home": {
     "recommendations": "Рекомендации для вас",

@@ -628,7 +628,7 @@ export default function App() {
         <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-8 grid grid-cols-1 sm:grid-cols-3 gap-6 text-sm">
           <div>
             <div className="font-display text-[20px] font-extrabold">
-              <span className="text-brand-800">Tez</span><span className="text-go-500">Bazar</span>
+              <span className="text-brand-800">Al</span><span className="text-go-500">Mart</span>
             </div>
             <p className="mt-2 text-[13px] text-slate-600 leading-relaxed max-w-xs">{t('footer.about')}</p>
           </div>
