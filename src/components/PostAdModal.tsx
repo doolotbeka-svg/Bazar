@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Upload,
@@ -100,6 +100,19 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // The modal stays mounted while closed, so initial useState values are captured
+  // only once. Prefill contact fields from the current user every time it opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    setError(null);
+    if (user?.phone) {
+      setPhone((prev) => (isValidKyrgyzPhone(prev) ? prev : user.phone!));
+    }
+    if (user?.name) {
+      setSellerName((prev) => prev.trim() || user.name);
+    }
+  }, [isOpen, user]);
+
   if (!isOpen) return null;
 
   const cities = KYRGYZSTAN_LOCATIONS.filter((l) => l.type === 'city');
@@ -115,13 +128,21 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
   };
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const input = e.target;
+    const files = Array.from(input.files || []).filter((f) => f.type.startsWith('image/'));
+    input.value = '';
     if (files.length === 0) return;
     const remaining = 10 - images.length;
     const slice = files.slice(0, remaining);
-    const compressed = await Promise.all(slice.map((f) => compressImageToDataUrl(f)));
+    // A single broken/unsupported file must not reject the whole batch
+    const results = await Promise.allSettled(slice.map((f) => compressImageToDataUrl(f)));
+    const compressed = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+      .map((r) => r.value);
+    if (compressed.length < slice.length) {
+      setError(lang === 'kg' ? 'Айрым сүрөттөр жүктөлгөн жок' : 'Некоторые фото не удалось загрузить');
+    }
     setImages((prev) => [...prev, ...compressed].slice(0, 10));
-    e.target.value = '';
   };
 
   const removePhoto = (index: number) => {
@@ -137,10 +158,8 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
       }
       setStep(2);
     } else if (step === 2) {
-      const hasPrimaryTitle =
-        bilingual || lang === 'kg' ? titleKg.trim().length > 0 : titleRu.trim().length > 0;
       const hasAnyTitle = titleKg.trim().length > 0 || titleRu.trim().length > 0;
-      if (!hasPrimaryTitle && !hasAnyTitle) {
+      if (!hasAnyTitle) {
         setError(t('postAd.validationTitle'));
         return;
       }
@@ -150,9 +169,17 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Pressing Enter inside an input on steps 1-2 triggers implicit form submit.
+    // Treat it as "Next" instead of trying to publish a half-filled ad.
+    if (step < 3) {
+      goToNext();
+      return;
+    }
+    if (submitting) return;
     setError(null);
-    const numericPrice = priceStr.trim() ? Number(priceStr.replace(/\s+/g, '')) : null;
-    if (!negotiable && (!numericPrice || Number.isNaN(numericPrice) || numericPrice <= 0)) {
+    const parsedPrice = priceStr.trim() ? Number(priceStr.replace(/\s+/g, '')) : NaN;
+    const numericPrice = Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : null;
+    if (!negotiable && numericPrice === null) {
       setError(t('postAd.validationPrice'));
       return;
     }
@@ -177,8 +204,8 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
         phone,
         hasWhatsapp,
         sellerName: sellerName.trim() || user?.name || 'Сатуучу',
-        sellerId: user?.id || 'local-user',
-        sellerSince: user?.joinedAt || '2026'
+        sellerId: user?.id || 'guest',
+        sellerSince: user?.joinedAt || String(new Date().getFullYear())
       };
 
       const res = await fetch('/api/listings', {
@@ -203,7 +230,11 @@ export function PostAdModal({ isOpen, onClose, user, onCreated }: PostAdModalPro
       setNegotiable(false);
       onClose();
     } catch {
-      setError('Server error. Try again.');
+      setError(
+        lang === 'kg'
+          ? 'Сервер катасы. Кайра аракет кылыңыз.'
+          : 'Ошибка сервера. Попробуйте ещё раз.'
+      );
     } finally {
       setSubmitting(false);
     }
