@@ -4,7 +4,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { SEED_LISTINGS } from './src/data/seedListings.ts';
-import type { Listing, PromoteTier, UserProfile } from './src/types/marketplace.ts';
+import { MARKETPLACE_CATEGORIES } from './src/data/categories.ts';
+import { KYRGYZSTAN_LOCATIONS } from './src/data/locations.ts';
+import type { CategoryId, Listing, PromoteTier, UserProfile } from './src/types/marketplace.ts';
+
+const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
+const LOCATION_IDS = new Set<string>(KYRGYZSTAN_LOCATIONS.map((l) => l.id));
+
+/** Safely read a trimmed string from untrusted JSON input. */
+function str(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +44,9 @@ function ensureStore(): StoreData {
   try {
     const raw = fs.readFileSync(STORE_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoreData;
-    if (!Array.isArray(parsed.listings) || parsed.listings.length === 0) {
+    // Only re-seed when the file is corrupted. An empty array is a valid state
+    // (e.g. every listing was deleted) and must not bring the demo data back.
+    if (!Array.isArray(parsed.listings)) {
       parsed.listings = SEED_LISTINGS;
     }
     return {
@@ -74,29 +86,61 @@ async function startServer() {
   // API: Create a new listing
   app.post('/api/listings', (req, res) => {
     const store = ensureStore();
-    const body = req.body as Partial<Listing>;
-    if (!body.category || (!body.titleKg && !body.titleRu) || !body.locationId || !body.phone) {
-      res.status(400).json({ error: 'Missing required fields' });
+    const body = (req.body || {}) as Record<string, unknown>;
+    const titleKgIn = str(body.titleKg);
+    const titleRuIn = str(body.titleRu);
+    const descKgIn = str(body.descriptionKg);
+    const descRuIn = str(body.descriptionRu);
+    const phoneIn = str(body.phone);
+    const category = body.category as CategoryId;
+    const locationId = str(body.locationId);
+    const negotiable = Boolean(body.negotiable);
+    const price =
+      typeof body.price === 'number' && Number.isFinite(body.price) && body.price > 0
+        ? Math.round(body.price)
+        : null;
+
+    if (
+      !CATEGORY_IDS.has(category) ||
+      (!titleKgIn && !titleRuIn) ||
+      !LOCATION_IDS.has(locationId) ||
+      phoneIn.replace(/\D/g, '').length !== 12
+    ) {
+      res.status(400).json({ error: 'Missing or invalid required fields' });
+      return;
+    }
+    if (price === null && !negotiable) {
+      res.status(400).json({ error: 'Price required unless negotiable' });
       return;
     }
 
+    const images = Array.isArray(body.images)
+      ? body.images
+          .filter(
+            (img): img is string =>
+              typeof img === 'string' &&
+              (img.startsWith('data:image/') || img.startsWith('/src/assets/'))
+          )
+          .slice(0, 10)
+      : [];
+
     const newListing: Listing = {
-      id: `kg-${Date.now().toString(36)}`,
-      category: body.category,
-      titleKg: (body.titleKg || body.titleRu || '').trim().slice(0, 140),
-      titleRu: body.titleRu ? body.titleRu.trim().slice(0, 140) : undefined,
-      descriptionKg: (body.descriptionKg || body.descriptionRu || '').trim().slice(0, 3000),
-      descriptionRu: body.descriptionRu ? body.descriptionRu.trim().slice(0, 3000) : undefined,
-      price: body.negotiable && !body.price ? null : typeof body.price === 'number' ? body.price : null,
+      id: `kg-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      category,
+      titleKg: (titleKgIn || titleRuIn).slice(0, 140),
+      titleRu: titleRuIn ? titleRuIn.slice(0, 140) : undefined,
+      descriptionKg: (descKgIn || descRuIn).slice(0, 3000),
+      descriptionRu: descRuIn ? descRuIn.slice(0, 3000) : undefined,
+      price,
       currency: body.currency === 'USD' ? 'USD' : 'KGS',
-      negotiable: Boolean(body.negotiable),
-      locationId: body.locationId,
-      images: Array.isArray(body.images) ? body.images.slice(0, 10) : [],
-      phone: body.phone.trim(),
+      negotiable,
+      locationId,
+      images,
+      phone: phoneIn,
       hasWhatsapp: body.hasWhatsapp !== false,
-      sellerName: (body.sellerName || 'Сатуучу').trim().slice(0, 80),
-      sellerId: body.sellerId || 'guest',
-      sellerSince: body.sellerSince || '2026',
+      sellerName: (str(body.sellerName) || 'Сатуучу').slice(0, 80),
+      sellerId: str(body.sellerId) || 'guest',
+      sellerSince: str(body.sellerSince) || String(new Date().getFullYear()),
       createdAt: new Date().toISOString(),
       views: 1,
       promoteTier: 'none',
@@ -223,7 +267,9 @@ async function startServer() {
 
   app.post('/api/favorites/sync', (req, res) => {
     const userId = String(req.body?.userId || '').trim();
-    const favorites = Array.isArray(req.body?.favorites) ? (req.body.favorites as string[]) : [];
+    const favorites: string[] = Array.isArray(req.body?.favorites)
+      ? (req.body.favorites as unknown[]).filter((f): f is string => typeof f === 'string').slice(0, 500)
+      : [];
     if (!userId) {
       res.status(400).json({ error: 'userId required' });
       return;
@@ -233,6 +279,21 @@ async function startServer() {
     saveStore(store);
     res.json({ favorites });
   });
+
+  // Unknown API routes must return JSON 404, not the SPA index.html
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
+  // Malformed JSON / oversized bodies -> clean JSON error instead of an HTML stack trace
+  app.use(
+    (err: Error & { status?: number }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (res.headersSent) return next(err);
+      const status = err.status && err.status >= 400 && err.status < 500 ? err.status : 500;
+      if (status === 500) console.error(err);
+      res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
+    }
+  );
 
   const isProd = process.env.NODE_ENV === 'production';
 
@@ -256,4 +317,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

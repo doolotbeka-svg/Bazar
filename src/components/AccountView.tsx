@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
+  ImageOff,
   Phone,
   Sparkles,
   Heart,
@@ -24,6 +25,7 @@ interface AccountViewProps {
   activeTab: 'my_ads' | 'favorites' | 'promote';
   onTabChange: (tab: 'my_ads' | 'favorites' | 'promote') => void;
   listings: Listing[];
+  ownAdIds: string[];
   favorites: string[];
   onToggleFavorite: (id: string) => void;
   onSelectListing: (listing: Listing) => void;
@@ -40,6 +42,7 @@ export function AccountView({
   activeTab,
   onTabChange,
   listings,
+  ownAdIds,
   favorites,
   onToggleFavorite,
   onSelectListing,
@@ -57,10 +60,20 @@ export function AccountView({
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [googleEmail, setGoogleEmail] = useState('azamat.bishkek@gmail.com');
-  const [googleName, setGoogleName] = useState('Азамат Токтосунов');
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
 
   const [promoteFeedback, setPromoteFeedback] = useState<string | null>(null);
+  const promoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+    };
+  }, []);
+
+  const networkError =
+    lang === 'kg' ? 'Тармак катасы. Кайра аракет кылыңыз.' : 'Ошибка сети. Попробуйте ещё раз.';
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,12 +84,15 @@ export function AccountView({
     }
     setAuthLoading(true);
     try {
-      await fetch('/api/auth/send-otp', {
+      const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone })
       });
+      if (!res.ok) throw new Error('send-otp failed');
       setOtpSent(true);
+    } catch {
+      setAuthError(networkError);
     } finally {
       setAuthLoading(false);
     }
@@ -98,6 +114,8 @@ export function AccountView({
       }
       const data = (await res.json()) as { user: UserProfile; favorites: string[] };
       onLogin(data.user, data.favorites || []);
+    } catch {
+      setAuthError(networkError);
     } finally {
       setAuthLoading(false);
     }
@@ -105,32 +123,47 @@ export function AccountView({
 
   const handleGoogleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!googleEmail.trim()) return;
+    setAuthError(null);
+    const email = googleEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAuthError(lang === 'kg' ? 'Туура email жазыңыз' : 'Введите корректный email');
+      return;
+    }
     setAuthLoading(true);
     try {
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: googleEmail, name: googleName })
+        body: JSON.stringify({ email, name: googleName.trim() || email.split('@')[0] })
       });
-      if (res.ok) {
-        const data = (await res.json()) as { user: UserProfile; favorites: string[] };
-        onLogin(data.user, data.favorites || []);
-      }
+      if (!res.ok) throw new Error('google auth failed');
+      const data = (await res.json()) as { user: UserProfile; favorites: string[] };
+      onLogin(data.user, data.favorites || []);
+    } catch {
+      setAuthError(networkError);
     } finally {
       setAuthLoading(false);
     }
   };
 
+  // Only the signed-in user's ads, plus ads posted from this browser.
+  // (Previously every guest ad from any visitor showed up here and could be deleted.)
   const myListings = user
-    ? listings.filter((l) => l.sellerId === user.id || l.sellerId === 'local-user')
+    ? listings.filter((l) => l.sellerId === user.id || ownAdIds.includes(l.id))
     : [];
   const favoriteListings = listings.filter((l) => favorites.includes(l.id));
 
   const handlePromoteClick = (id: string, tier: PromoteTier) => {
     onPromoteListing(id, tier);
     setPromoteFeedback(t('account.promoteSuccess'));
-    setTimeout(() => setPromoteFeedback(null), 3000);
+    if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+    promoteTimerRef.current = setTimeout(() => setPromoteFeedback(null), 3000);
+  };
+
+  const handleDeleteClick = (id: string) => {
+    const question =
+      lang === 'kg' ? 'Жарыяны өчүрөсүзбү? Муну кайтаруу мүмкүн эмес.' : 'Удалить объявление? Это действие нельзя отменить.';
+    if (window.confirm(question)) onDeleteListing(id);
   };
 
   // Auth Gate when signed out (except if user opened Favorites tab, show Favorites + Auth banner)
@@ -282,6 +315,7 @@ export function AccountView({
                   type="text"
                   value={googleName}
                   onChange={(e) => setGoogleName(e.target.value)}
+                  placeholder={t('postAd.sellerNamePlaceholder')}
                   className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
@@ -293,6 +327,7 @@ export function AccountView({
                   type="email"
                   value={googleEmail}
                   onChange={(e) => setGoogleEmail(e.target.value)}
+                  placeholder="name@gmail.com"
                   className="w-full h-11 px-3.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
@@ -434,12 +469,21 @@ export function AccountView({
                   key={item.id}
                   className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row gap-4"
                 >
-                  <img
-                    src={item.images[0] || ''}
-                    alt={getLocalizedTitle(item, lang)}
-                    onClick={() => onSelectListing(item)}
-                    className="w-full sm:w-32 h-28 object-cover rounded-lg bg-slate-100 shrink-0 cursor-pointer"
-                  />
+                  {item.images[0] ? (
+                    <img
+                      src={item.images[0]}
+                      alt={getLocalizedTitle(item, lang)}
+                      onClick={() => onSelectListing(item)}
+                      className="w-full sm:w-32 h-28 object-cover rounded-lg bg-slate-100 shrink-0 cursor-pointer"
+                    />
+                  ) : (
+                    <div
+                      onClick={() => onSelectListing(item)}
+                      className="w-full sm:w-32 h-28 rounded-lg bg-slate-100 shrink-0 cursor-pointer flex items-center justify-center text-slate-400"
+                    >
+                      <ImageOff className="w-6 h-6" />
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between gap-2">
@@ -481,7 +525,7 @@ export function AccountView({
 
                       <button
                         type="button"
-                        onClick={() => onDeleteListing(item.id)}
+                        onClick={() => handleDeleteClick(item.id)}
                         className="px-3 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-xs font-semibold text-rose-600 flex items-center gap-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

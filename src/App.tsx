@@ -23,6 +23,29 @@ import { AccountView } from './components/AccountView';
 
 const USER_STORAGE_KEY = 'tezbazar_user';
 const FAVORITES_STORAGE_KEY = 'tezbazar_favorites';
+const OWN_ADS_STORAGE_KEY = 'tezbazar_own_ads';
+const AD_QUERY_PARAM = 'ad';
+
+function readJsonArray(key: string): string[] {
+  try {
+    const saved = localStorage.getItem(key);
+    const parsed: unknown = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function setAdQueryParam(id: string | null) {
+  try {
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set(AD_QUERY_PARAM, id);
+    else url.searchParams.delete(AD_QUERY_PARAM);
+    window.history.replaceState(null, '', url.toString());
+  } catch {
+    // ignore
+  }
+}
 
 export default function App() {
   const { lang, t } = useI18n();
@@ -54,22 +77,23 @@ export default function App() {
     }
   });
 
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(FAVORITES_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [favorites, setFavorites] = useState<string[]>(() => readJsonArray(FAVORITES_STORAGE_KEY));
+
+  // IDs of ads posted from this browser (also covers ads posted before signing in)
+  const [ownAdIds, setOwnAdIds] = useState<string[]>(() => readJsonArray(OWN_ADS_STORAGE_KEY));
 
   useEffect(() => {
     let active = true;
     fetch('/api/listings')
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { listings?: Listing[] } | null) => {
-        if (active && data?.listings && data.listings.length > 0) {
-          setListings(data.listings);
+        if (active && data && Array.isArray(data.listings)) {
+          const serverListings = data.listings;
+          setListings(serverListings);
+          // Open a shared ad link (?ad=<id>)
+          const sharedId = new URLSearchParams(window.location.search).get(AD_QUERY_PARAM);
+          const shared = sharedId ? serverListings.find((l) => l.id === sharedId) : undefined;
+          if (shared) setSelectedListing(shared);
         }
       })
       .catch(() => {
@@ -105,8 +129,18 @@ export default function App() {
     persistFavorites(next, user);
   };
 
+  const persistOwnAds = (next: string[]) => {
+    setOwnAdIds(next);
+    try {
+      localStorage.setItem(OWN_ADS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
   const handleSelectListing = (listing: Listing) => {
     setSelectedListing({ ...listing, views: listing.views + 1 });
+    setAdQueryParam(listing.id);
     setListings((prev) =>
       prev.map((item) => (item.id === listing.id ? { ...item, views: item.views + 1 } : item))
     );
@@ -115,6 +149,7 @@ export default function App() {
 
   const handleCreatedListing = (created: Listing) => {
     setListings((prev) => [created, ...prev]);
+    persistOwnAds([...ownAdIds, created.id]);
     setCurrentView('home');
     setCategoryId('all');
     setLocationId('all');
@@ -123,6 +158,8 @@ export default function App() {
 
   const handleDeleteListing = (id: string) => {
     setListings((prev) => prev.filter((item) => item.id !== id));
+    persistOwnAds(ownAdIds.filter((item) => item !== id));
+    if (selectedListing?.id === id) setSelectedListing(null);
     fetch(`/api/listings/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
@@ -383,6 +420,7 @@ export default function App() {
             activeTab={accountTab}
             onTabChange={setAccountTab}
             listings={listings}
+            ownAdIds={ownAdIds}
             favorites={favorites}
             onToggleFavorite={handleToggleFavorite}
             onSelectListing={handleSelectListing}
@@ -479,7 +517,10 @@ export default function App() {
       <ListingDetailModal
         listing={selectedListing}
         isFavorite={selectedListing ? favorites.includes(selectedListing.id) : false}
-        onClose={() => setSelectedListing(null)}
+        onClose={() => {
+          setSelectedListing(null);
+          setAdQueryParam(null);
+        }}
         onToggleFavorite={handleToggleFavorite}
       />
 
