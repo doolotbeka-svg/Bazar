@@ -16,11 +16,20 @@ export interface OtpRecord {
   sentToday: number;
 }
 
+/** A pending "sign in via the Telegram bot" request, keyed by a random nonce. */
+export interface TelegramLoginRecord {
+  createdAt: number;
+  status: 'pending' | 'confirmed';
+  telegramId?: string;
+  name?: string;
+}
+
 export interface StoreData {
   listings: Listing[];
   favoritesByUser: Record<string, string[]>;
   users: Record<string, UserProfile>;
   otps: Record<string, OtpRecord>;
+  tgLogins: Record<string, TelegramLoginRecord>;
 }
 
 export interface StoredImage {
@@ -42,7 +51,7 @@ export interface Storage {
 export const IMAGE_ROUTE_PREFIX = '/api/images/';
 
 function emptyStore(): StoreData {
-  return { listings: SEED_LISTINGS, favoritesByUser: {}, users: {}, otps: {} };
+  return { listings: SEED_LISTINGS, favoritesByUser: {}, users: {}, otps: {}, tgLogins: {} };
 }
 
 function normalize(parsed: Partial<StoreData> | null | undefined): StoreData {
@@ -53,7 +62,8 @@ function normalize(parsed: Partial<StoreData> | null | undefined): StoreData {
     listings: Array.isArray(parsed.listings) ? parsed.listings : SEED_LISTINGS,
     favoritesByUser: parsed.favoritesByUser || {},
     users: parsed.users || {},
-    otps: parsed.otps || {}
+    otps: parsed.otps || {},
+    tgLogins: parsed.tgLogins || {}
   };
 }
 
