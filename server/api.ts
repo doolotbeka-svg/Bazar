@@ -546,6 +546,31 @@ export function createApiApp() {
 
   registerAdminRoutes(app, { adminRepo, storage });
 
+  /*
+   * Digital Asset Links: lets the Google Play app (Trusted Web Activity) open
+   * this site full-screen without a browser bar. ANDROID_CERT_SHA256 holds the
+   * signing certificate fingerprints (upload key and Google Play app-signing key),
+   * comma separated, e.g. "AB:CD:...".
+   */
+  app.get('/.well-known/assetlinks.json', (_req, res) => {
+    const packageName = process.env.ANDROID_PACKAGE || 'kg.almart.app';
+    const fingerprints = (process.env.ANDROID_CERT_SHA256 || '')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(s));
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json(
+      fingerprints.length
+        ? [
+            {
+              relation: ['delegate_permission/common.handle_all_urls'],
+              target: { namespace: 'android_app', package_name: packageName, sha256_cert_fingerprints: fingerprints }
+            }
+          ]
+        : []
+    );
+  });
+
   // Unknown API routes must return JSON 404, not the SPA index.html
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });

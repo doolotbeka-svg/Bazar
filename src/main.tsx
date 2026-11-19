@@ -24,6 +24,13 @@ function Root() {
   return admin ? <AdminPage /> : <App />;
 }
 
+// Service worker: makes the site installable (Android app / "Add to home screen")
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nProvider>
