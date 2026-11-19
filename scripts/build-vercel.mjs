@@ -31,6 +31,8 @@ await build({
   format: 'esm',
   // Some CommonJS deps (express) call require() at runtime
   banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
+  // PGlite is only used for local development (dynamic import when DATABASE_URL is unset)
+  external: ['@electric-sql/pglite'],
   logLevel: 'warning'
 });
 fs.writeFileSync(

@@ -3,7 +3,9 @@ import express from 'express';
 import { MARKETPLACE_CATEGORIES } from '../src/data/categories.ts';
 import { KYRGYZSTAN_LOCATIONS } from '../src/data/locations.ts';
 import type { CategoryId, Listing, PromoteTier, UserProfile } from '../src/types/marketplace.ts';
-import { createStorage, IMAGE_ROUTE_PREFIX, type StoreData } from './storage.ts';
+import { createStorage, IMAGE_ROUTE_PREFIX } from './storage.ts';
+import { getDb } from './db.ts';
+import { createRepo, type Repo } from './repo.ts';
 import {
   createListingKey,
   createSessionToken,
@@ -74,73 +76,42 @@ function assertCanManage(req: express.Request, listing: Listing) {
 
 /** Express app with all /api routes. Used by the local server and the Vercel function. */
 export function createApiApp() {
+  // Photos stay in Vercel Blob (or local files); everything else lives in Postgres
   const storage = createStorage();
   const app = express();
   // Vercel functions reject request bodies over 4.5 MB
   app.use(express.json({ limit: '4mb' }));
 
-  /* ---------------- store access ---------------- */
-
-  // Short read cache so a page load (several requests) costs one storage read
-  let cache: { data: StoreData; at: number } | null = null;
-  const CACHE_MS = 3000;
-
-  // View counters are buffered and flushed at most once a minute, so that every
-  // page view does not rewrite the whole store (each write is a paid Blob op).
-  const pendingViews = new Map<string, number>();
-  let lastViewFlush = Date.now();
-  const VIEW_FLUSH_MS = 60_000;
-
-  const applyPendingViews = (data: StoreData) => {
-    for (const [id, n] of pendingViews) {
-      const listing = data.listings.find((l) => l.id === id);
-      if (listing) listing.views += n;
-    }
-    pendingViews.clear();
-    lastViewFlush = Date.now();
+  let repoPromise: Promise<Repo> | null = null;
+  const repo = (): Promise<Repo> => {
+    repoPromise ??= getDb(storage)
+      .then(createRepo)
+      .catch((err) => {
+        repoPromise = null;
+        throw err;
+      });
+    return repoPromise;
   };
 
-  const read = async (): Promise<StoreData> => {
-    if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
-    const data = await storage.load();
-    cache = { data, at: Date.now() };
-    return data;
-  };
-
-  // Serialize read-modify-write cycles within this instance
-  let queue: Promise<unknown> = Promise.resolve();
-  const mutate = <T>(fn: (data: StoreData) => T | Promise<T>): Promise<T> => {
-    const run = queue.then(async () => {
-      const data = await storage.load(); // always fresh before writing
-      const result = await fn(data);
-      applyPendingViews(data);
-      await storage.save(data);
-      cache = { data, at: Date.now() };
-      return result;
-    });
-    queue = run.catch(() => undefined);
-    return run;
-  };
-
-  /** Show buffered (not yet saved) views in responses. */
-  const withPendingViews = (listings: Listing[]): Listing[] =>
-    pendingViews.size === 0
-      ? listings
-      : listings.map((l) => (pendingViews.has(l.id) ? { ...l, views: l.views + pendingViews.get(l.id)! } : l));
-
-  const findOr404 = (data: StoreData, id: string): Listing => {
-    const listing = data.listings.find((item) => item.id === id);
+  const getListingOr404 = async (id: string): Promise<Listing> => {
+    const listing = await (await repo()).getListing(id);
     if (!listing) throw new HttpError(404, 'Listing not found');
     return listing;
   };
 
-  /* ---------------- routes ---------------- */
+  /** Find or create the user and return what the client needs after sign-in. */
+  const signIn = async (profile: UserProfile) => {
+    const r = await repo();
+    const user = await r.ensureUser(profile);
+    return { user, favorites: await r.getFavorites(user.id), token: createSessionToken(user.id) };
+  };
+
+  /* ---------------- listings ---------------- */
 
   app.get(
     '/api/listings',
     wrap(async (_req, res) => {
-      const data = await read();
-      res.json({ listings: withPendingViews(data.listings) });
+      res.json({ listings: await (await repo()).listListings() });
     })
   );
 
@@ -177,7 +148,7 @@ export function createApiApp() {
       const sellerId = sessionUserId(req) || 'guest';
       const id = `kg-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-      // Upload photos first (outside the store lock); keep only the ones that succeed
+      // Upload photos first; keep only the ones that succeed
       const rawImages = Array.isArray(body.images)
         ? body.images.filter((img): img is string => typeof img === 'string').slice(0, 10)
         : [];
@@ -217,9 +188,7 @@ export function createApiApp() {
         status: 'active'
       };
 
-      await mutate((data) => {
-        data.listings.unshift(newListing);
-      });
+      await (await repo()).insertListing(newListing);
       // The manage key is only ever sent here, to the poster
       res.status(201).json({ listing: newListing, manageKey: createListingKey(id) });
     })
@@ -228,13 +197,9 @@ export function createApiApp() {
   app.post(
     '/api/listings/:id/view',
     wrap(async (req, res) => {
-      const data = await read();
-      const listing = findOr404(data, req.params.id);
-      pendingViews.set(listing.id, (pendingViews.get(listing.id) || 0) + 1);
-      if (Date.now() - lastViewFlush > VIEW_FLUSH_MS) {
-        await mutate(() => undefined); // flushes pending views
-      }
-      res.json({ views: withPendingViews([listing])[0].views });
+      const views = await (await repo()).incrementViews(req.params.id);
+      if (views === null) throw new HttpError(404, 'Listing not found');
+      res.json({ views });
     })
   );
 
@@ -242,12 +207,9 @@ export function createApiApp() {
     '/api/listings/:id/status',
     wrap(async (req, res) => {
       const status = req.body?.status === 'sold' ? 'sold' : 'active';
-      const listing = await mutate((data) => {
-        const found = findOr404(data, req.params.id);
-        assertCanManage(req, found);
-        found.status = status;
-        return found;
-      });
+      assertCanManage(req, await getListingOr404(req.params.id));
+      const listing = await (await repo()).setStatus(req.params.id, status);
+      if (!listing) throw new HttpError(404, 'Listing not found');
       res.json({ listing });
     })
   );
@@ -259,12 +221,9 @@ export function createApiApp() {
       if (tier !== 'vip' && tier !== 'top' && tier !== 'none') {
         throw new HttpError(400, 'Invalid promotion tier');
       }
-      const listing = await mutate((data) => {
-        const found = findOr404(data, req.params.id);
-        assertCanManage(req, found);
-        found.promoteTier = tier;
-        return found;
-      });
+      assertCanManage(req, await getListingOr404(req.params.id));
+      const listing = await (await repo()).setPromoteTier(req.params.id, tier);
+      if (!listing) throw new HttpError(404, 'Listing not found');
       res.json({ listing });
     })
   );
@@ -272,15 +231,11 @@ export function createApiApp() {
   app.delete(
     '/api/listings/:id',
     wrap(async (req, res) => {
-      const removed = await mutate((data) => {
-        const found = findOr404(data, req.params.id);
-        assertCanManage(req, found);
-        data.listings = data.listings.filter((item) => item !== found);
-        return found;
-      });
-      pendingViews.delete(removed.id);
+      const found = await getListingOr404(req.params.id);
+      assertCanManage(req, found);
+      if (!(await (await repo()).deleteListing(found.id))) throw new HttpError(404, 'Listing not found');
       try {
-        await storage.deleteImages(removed.images);
+        await storage.deleteImages(found.images);
       } catch (err) {
         console.error('Image cleanup failed', err);
       }
@@ -350,28 +305,17 @@ export function createApiApp() {
 
       const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
       const now = Date.now();
-      const today = new Date(now).toISOString().slice(0, 10);
-
-      await mutate((data) => {
-        const prev = data.otps[digits];
-        if (prev && now - prev.lastSentAt < OTP_RESEND_MS) {
-          throw new HttpError(429, 'Please wait before requesting a new code');
-        }
-        const sentToday = prev && prev.day === today ? prev.sentToday : 0;
-        if (sentToday >= OTP_MAX_PER_DAY) throw new HttpError(429, 'Too many codes today');
-        // Drop expired records so the store does not grow forever
-        for (const [phone, rec] of Object.entries(data.otps)) {
-          if (rec.expiresAt < now && rec.day !== today) delete data.otps[phone];
-        }
-        data.otps[digits] = {
-          codeHash: hashOtp(digits, code),
-          expiresAt: now + OTP_TTL_MS,
-          attempts: 0,
-          lastSentAt: now,
-          day: today,
-          sentToday: sentToday + 1
-        };
+      const r = await repo();
+      const saved = await r.saveOtp({
+        phone: digits,
+        codeHash: hashOtp(digits, code),
+        expiresAt: now + OTP_TTL_MS,
+        now,
+        day: new Date(now).toISOString().slice(0, 10),
+        resendMs: OTP_RESEND_MS,
+        maxPerDay: OTP_MAX_PER_DAY
       });
+      if (!saved) throw new HttpError(429, 'Please wait before requesting a new code');
 
       if (sms) {
         try {
@@ -379,14 +323,7 @@ export function createApiApp() {
         } catch (err) {
           console.error(err);
           // Not delivered: cancel this code and give back the resend/daily allowance
-          await mutate((data) => {
-            const rec = data.otps[digits];
-            if (rec && rec.lastSentAt === now) {
-              rec.expiresAt = 0;
-              rec.lastSentAt = 0;
-              rec.sentToday = Math.max(0, rec.sentToday - 1);
-            }
-          }).catch(() => undefined);
+          await r.cancelOtp(digits, now).catch(() => undefined);
           throw new HttpError(502, 'SMS could not be sent');
         }
       }
@@ -403,33 +340,29 @@ export function createApiApp() {
       const code = str(req.body?.code);
       if (!digits || !/^\d{6}$/.test(code)) throw new HttpError(400, 'Invalid phone or code');
 
-      const outcome = await mutate((data) => {
-        const rec = data.otps[digits];
-        if (!rec || rec.expiresAt < Date.now() || rec.attempts >= OTP_MAX_ATTEMPTS) {
-          return { error: 'expired' as const };
-        }
-        if (!otpMatches(digits, code, rec.codeHash)) {
-          rec.attempts += 1;
-          return { error: 'wrong' as const };
-        }
-        // One-time: the code cannot be used again (keep limits for the day)
-        rec.expiresAt = 0;
-        const userId = `phone-${digits}`;
-        const user: UserProfile = data.users[userId] || {
-          id: userId,
+      const r = await repo();
+      const now = Date.now();
+      const rec = await r.getOtp(digits);
+      if (!rec || rec.expiresAt < now || rec.attempts >= OTP_MAX_ATTEMPTS) {
+        throw new HttpError(401, 'Code expired, request a new one');
+      }
+      if (!otpMatches(digits, code, rec.codeHash)) {
+        await r.addOtpAttempt(digits);
+        throw new HttpError(401, 'Invalid code');
+      }
+      // One-time: the code cannot be used again (keep limits for the day)
+      if (!(await r.consumeOtp(digits, rec.codeHash, now, OTP_MAX_ATTEMPTS))) {
+        throw new HttpError(401, 'Code expired, request a new one');
+      }
+      res.json(
+        await signIn({
+          id: `phone-${digits}`,
           name: `Колдонуучу ${digits.slice(-4)}`,
           phone: formatPhone(digits),
           authMethod: 'phone',
           joinedAt: String(new Date().getFullYear())
-        };
-        data.users[userId] = user;
-        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
-      });
-
-      if ('error' in outcome) {
-        throw new HttpError(401, outcome.error === 'expired' ? 'Code expired, request a new one' : 'Invalid code');
-      }
-      res.json(outcome);
+        })
+      );
     })
   );
 
@@ -439,21 +372,24 @@ export function createApiApp() {
       if (!getGoogleClientId()) throw new HttpError(404, 'Google sign-in is not configured');
       const identity = await verifyGoogleIdToken(str(req.body?.credential));
       if (!identity) throw new HttpError(401, 'Invalid Google credential');
-      const userId = `google-${identity.sub}`;
-      const result = await mutate((data) => {
-        const user: UserProfile = data.users[userId] || {
-          id: userId,
+      res.json(
+        await signIn({
+          id: `google-${identity.sub}`,
           name: identity.name.slice(0, 80),
           email: identity.email,
           authMethod: 'google',
           joinedAt: String(new Date().getFullYear())
-        };
-        data.users[userId] = user;
-        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
-      });
-      res.json(result);
+        })
+      );
     })
   );
+
+  const telegramProfile = (telegramId: string, name: string): UserProfile => ({
+    id: `telegram-${telegramId}`,
+    name,
+    authMethod: 'telegram',
+    joinedAt: String(new Date().getFullYear())
+  });
 
   app.post(
     '/api/auth/telegram',
@@ -461,36 +397,11 @@ export function createApiApp() {
       if (!getTelegramBotName()) throw new HttpError(404, 'Telegram sign-in is not configured');
       const identity = verifyTelegramAuth(req.body);
       if (!identity) throw new HttpError(401, 'Invalid Telegram login data');
-      const userId = `telegram-${identity.id}`;
-      const result = await mutate((data) => {
-        const user: UserProfile = data.users[userId] || {
-          id: userId,
-          name: identity.name,
-          authMethod: 'telegram',
-          joinedAt: String(new Date().getFullYear())
-        };
-        data.users[userId] = user;
-        return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
-      });
-      res.json(result);
+      res.json(await signIn(telegramProfile(identity.id, identity.name)));
     })
   );
 
   /* ---------- sign-in through the Telegram bot ---------- */
-
-  const finishTelegramLogin = async (telegramId: string, name: string) => {
-    const userId = `telegram-${telegramId}`;
-    return mutate((data) => {
-      const user: UserProfile = data.users[userId] || {
-        id: userId,
-        name,
-        authMethod: 'telegram',
-        joinedAt: String(new Date().getFullYear())
-      };
-      data.users[userId] = user;
-      return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
-    });
-  };
 
   // 1. The page asks for a one-time login link
   app.post(
@@ -500,14 +411,9 @@ export function createApiApp() {
       if (!bot) throw new HttpError(404, 'Telegram sign-in is not configured');
       await ensureWebhook();
       const nonce = randomBytes(16).toString('base64url');
-      const now = Date.now();
-      await mutate((data) => {
-        for (const [key, rec] of Object.entries(data.tgLogins)) {
-          if (now - rec.createdAt > TG_LOGIN_TTL_MS) delete data.tgLogins[key];
-        }
-        if (Object.keys(data.tgLogins).length > 500) throw new HttpError(429, 'Too many pending logins');
-        data.tgLogins[nonce] = { createdAt: now, status: 'pending' };
-      });
+      if (!(await (await repo()).createTgLogin(nonce, Date.now(), TG_LOGIN_TTL_MS, 500))) {
+        throw new HttpError(429, 'Too many pending logins');
+      }
       res.json({ nonce, url: `https://t.me/${bot}?start=login_${nonce}` });
     })
   );
@@ -518,7 +424,8 @@ export function createApiApp() {
     wrap(async (req, res) => {
       const nonce = req.body?.nonce;
       if (!isValidNonce(nonce)) throw new HttpError(400, 'Invalid nonce');
-      const rec = (await read()).tgLogins[nonce];
+      const r = await repo();
+      const rec = await r.getTgLogin(nonce);
       if (!rec || Date.now() - rec.createdAt > TG_LOGIN_TTL_MS) {
         res.json({ status: 'expired' });
         return;
@@ -527,18 +434,13 @@ export function createApiApp() {
         res.json({ status: 'pending' });
         return;
       }
-      // One-time: consume the confirmation inside the lock
-      const claimed = await mutate((data) => {
-        const fresh = data.tgLogins[nonce];
-        if (!fresh || fresh.status !== 'confirmed' || !fresh.telegramId) return null;
-        delete data.tgLogins[nonce];
-        return { telegramId: fresh.telegramId, name: fresh.name || 'Telegram' };
-      });
+      // One-time: the confirmation is consumed by a single DELETE ... RETURNING
+      const claimed = await r.claimTgLogin(nonce);
       if (!claimed) {
         res.json({ status: 'expired' });
         return;
       }
-      res.json({ status: 'ok', ...(await finishTelegramLogin(claimed.telegramId, claimed.name)) });
+      res.json({ status: 'ok', ...(await signIn(telegramProfile(claimed.telegramId, claimed.name))) });
     })
   );
 
@@ -558,19 +460,21 @@ export function createApiApp() {
         const msg = update.message;
         const startMatch = /^\/start login_([A-Za-z0-9_-]{16,40})$/.exec(msg?.text?.trim() || '');
         if (msg?.chat && startMatch) {
-          // The link is checked (with fresh data) when the user presses Confirm
+          // The link is checked when the user presses Confirm
           await telegramApi('sendMessage', {
-                chat_id: msg.chat.id,
-                text:
-                  'Вход на сайт AlMart (tezbazar.vercel.app).\n\n' +
-                  'Нажмите «Подтвердить», только если вы сами только что нажали «Войти через Telegram» на сайте.',
-                reply_markup: {
-                  inline_keyboard: [[
-                    { text: '✅ Подтвердить вход', callback_data: `ok:${startMatch[1]}` },
-                    { text: 'Отмена', callback_data: 'no' }
-                  ]]
-                }
-              });
+            chat_id: msg.chat.id,
+            text:
+              'Вход на сайт AlMart (tezbazar.vercel.app).\n\n' +
+              'Нажмите «Подтвердить», только если вы сами только что нажали «Войти через Telegram» на сайте.',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✅ Подтвердить вход', callback_data: `ok:${startMatch[1]}` },
+                  { text: 'Отмена', callback_data: 'no' }
+                ]
+              ]
+            }
+          });
         } else if (msg?.chat && msg.text?.startsWith('/start')) {
           await telegramApi('sendMessage', {
             chat_id: msg.chat.id,
@@ -583,15 +487,12 @@ export function createApiApp() {
           const okMatch = /^ok:([A-Za-z0-9_-]{16,40})$/.exec(cb.data || '');
           let reply = 'Вход отменён.';
           if (okMatch) {
-            const nonce = okMatch[1];
-            const confirmed = await mutate((data) => {
-              const rec = data.tgLogins[nonce];
-              if (!rec || rec.status !== 'pending' || Date.now() - rec.createdAt > TG_LOGIN_TTL_MS) return false;
-              rec.status = 'confirmed';
-              rec.telegramId = String(cb.from.id);
-              rec.name = displayName(cb.from);
-              return true;
-            });
+            const confirmed = await (await repo()).confirmTgLogin(
+              okMatch[1],
+              String(cb.from.id),
+              displayName(cb.from),
+              Date.now() - TG_LOGIN_TTL_MS
+            );
             reply = confirmed
               ? '✅ Готово! Вернитесь на сайт AlMart — вы уже вошли.'
               : 'Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.';
@@ -621,9 +522,7 @@ export function createApiApp() {
       const favorites: string[] = Array.isArray(req.body?.favorites)
         ? (req.body.favorites as unknown[]).filter((f): f is string => typeof f === 'string').slice(0, 500)
         : [];
-      await mutate((data) => {
-        data.favoritesByUser[userId] = favorites;
-      });
+      await (await repo()).setFavorites(userId, favorites);
       res.json({ favorites });
     })
   );

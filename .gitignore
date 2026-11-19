@@ -10,3 +10,6 @@ coverage/
 # Local JSON database created by server.ts
 data/
 .vercel/
+
+# Local PGlite database
+.data/
