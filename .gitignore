@@ -13,3 +13,11 @@ data/
 
 # Local PGlite database
 .data/
+
+# Android build output and signing secrets (keep a backup of the keystore!)
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/keystore.properties
+android/*.jks
