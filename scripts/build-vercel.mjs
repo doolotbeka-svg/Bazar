@@ -38,7 +38,9 @@ await build({
 fs.writeFileSync(
   path.join(fnDir, '.vc-config.json'),
   JSON.stringify(
-    { runtime: 'nodejs22.x', handler: 'index.mjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 10 },
+    { runtime: 'nodejs22.x', handler: 'index.mjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 10,
+      // Frankfurt: next to the Neon database and closer to Kyrgyzstan than the default US region
+      regions: ['fra1'] },
     null,
     2
   )
