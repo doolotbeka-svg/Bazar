@@ -65,9 +65,12 @@ export function AccountView({
   const [authLoading, setAuthLoading] = useState(false);
 
   // Which sign-in methods the server has configured
-  const [authConfig, setAuthConfig] = useState<{ googleClientId: string | null; telegramBot: string | null; smsDemo: boolean } | null>(
-    null
-  );
+  const [authConfig, setAuthConfig] = useState<{
+    googleClientId: string | null;
+    telegramBot: string | null;
+    phoneLogin: boolean;
+    smsDemo: boolean;
+  } | null>(null);
   useEffect(() => {
     if (user) return;
     let active = true;
@@ -77,7 +80,10 @@ export function AccountView({
         if (active && cfg) {
           setAuthConfig(cfg);
           // Telegram is the main real sign-in while SMS is in demo mode
-          if (cfg.telegramBot && !authMethodTouched.current) setAuthMethod('telegram');
+          if (!authMethodTouched.current) {
+            if (cfg.telegramBot) setAuthMethod('telegram');
+            else if (!cfg.phoneLogin) setAuthMethod('google');
+          }
         }
       })
       .catch(() => {});
@@ -196,6 +202,15 @@ export function AccountView({
     }
   };
 
+  // Phone sign-in is hidden while the server has it switched off (SMS in demo mode on the live site)
+  const visibleMethods = (
+    [
+      ['telegram', 'Telegram'],
+      ['phone', 'Телефон'],
+      ['google', 'Google']
+    ] as const
+  ).filter(([method]) => method !== 'phone' || authConfig?.phoneLogin);
+
   // Only the signed-in user's ads, plus ads posted from this browser.
   // (Previously every guest ad from any visitor showed up here and could be deleted.)
   const myListings = user
@@ -254,14 +269,8 @@ export function AccountView({
           <p className="mt-1.5 text-sm text-slate-600">{t('account.authSubtitle')}</p>
 
           {/* Segmented Auth Method Tabs */}
-          <div className="mt-5 grid grid-cols-3 gap-1 p-1 bg-slate-200/70 rounded-xl">
-            {(
-              [
-                ['telegram', 'Telegram'],
-                ['phone', lang === 'kg' ? 'Телефон' : 'Телефон'],
-                ['google', 'Google']
-              ] as const
-            ).map(([method, label]) => (
+          <div className={`mt-5 grid ${visibleMethods.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-1 p-1 bg-slate-200/70 rounded-xl`}>
+            {visibleMethods.map(([method, label]) => (
               <button
                 key={method}
                 type="button"
