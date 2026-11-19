@@ -123,6 +123,15 @@ export default function App() {
     };
   }, []);
 
+  // App shortcut "Жарыя берүү" opens the post form (/?post=1)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('post') !== '1') return;
+    setIsPostAdOpen(true);
+    url.searchParams.delete('post');
+    window.history.replaceState(null, '', url.toString());
+  }, []);
+
   // Site-wide announcement set from the admin panel
   const [announcement, setAnnouncement] = useState<{ kg: string; ru: string } | null>(null);
   useEffect(() => {

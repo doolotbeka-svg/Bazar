@@ -55,6 +55,8 @@ fs.writeFileSync(
       routes: [
         { handle: 'filesystem' },
         { src: '^/api(?:/.*)?$', dest: '/api' },
+        // Android app (Trusted Web Activity) domain verification, served by the API
+        { src: '^/\\.well-known/assetlinks\\.json$', dest: '/api' },
         { src: '^/(.*)$', dest: '/index.html' }
       ]
     },
