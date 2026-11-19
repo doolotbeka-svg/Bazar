@@ -1,4 +1,4 @@
-import { randomInt } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import express from 'express';
 import { MARKETPLACE_CATEGORIES } from '../src/data/categories.ts';
 import { KYRGYZSTAN_LOCATIONS } from '../src/data/locations.ts';
@@ -14,6 +14,16 @@ import {
 } from './auth.ts';
 import { getGoogleClientId, verifyGoogleIdToken } from './google.ts';
 import { getTelegramBotName, verifyTelegramAuth } from './telegram.ts';
+import {
+  displayName,
+  ensureWebhook,
+  isValidNonce,
+  telegramApi,
+  TG_LOGIN_TTL_MS,
+  type TgUser,
+  WEBHOOK_PATH,
+  webhookSecret
+} from './telegramBot.ts';
 import { createSmsSender, isSmsDemoMode } from './sms.ts';
 
 const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
@@ -451,6 +461,143 @@ export function createApiApp() {
         return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
       });
       res.json(result);
+    })
+  );
+
+  /* ---------- sign-in through the Telegram bot ---------- */
+
+  const finishTelegramLogin = async (telegramId: string, name: string) => {
+    const userId = `telegram-${telegramId}`;
+    return mutate((data) => {
+      const user: UserProfile = data.users[userId] || {
+        id: userId,
+        name,
+        authMethod: 'telegram',
+        joinedAt: String(new Date().getFullYear())
+      };
+      data.users[userId] = user;
+      return { user, favorites: data.favoritesByUser[userId] || [], token: createSessionToken(userId) };
+    });
+  };
+
+  // 1. The page asks for a one-time login link
+  app.post(
+    '/api/auth/telegram-bot/start',
+    wrap(async (_req, res) => {
+      const bot = getTelegramBotName();
+      if (!bot) throw new HttpError(404, 'Telegram sign-in is not configured');
+      await ensureWebhook();
+      const nonce = randomBytes(16).toString('base64url');
+      const now = Date.now();
+      await mutate((data) => {
+        for (const [key, rec] of Object.entries(data.tgLogins)) {
+          if (now - rec.createdAt > TG_LOGIN_TTL_MS) delete data.tgLogins[key];
+        }
+        if (Object.keys(data.tgLogins).length > 500) throw new HttpError(429, 'Too many pending logins');
+        data.tgLogins[nonce] = { createdAt: now, status: 'pending' };
+      });
+      res.json({ nonce, url: `https://t.me/${bot}?start=login_${nonce}` });
+    })
+  );
+
+  // 2. The page polls until the user confirms in Telegram
+  app.post(
+    '/api/auth/telegram-bot/poll',
+    wrap(async (req, res) => {
+      const nonce = req.body?.nonce;
+      if (!isValidNonce(nonce)) throw new HttpError(400, 'Invalid nonce');
+      const rec = (await read()).tgLogins[nonce];
+      if (!rec || Date.now() - rec.createdAt > TG_LOGIN_TTL_MS) {
+        res.json({ status: 'expired' });
+        return;
+      }
+      if (rec.status !== 'confirmed') {
+        res.json({ status: 'pending' });
+        return;
+      }
+      // One-time: consume the confirmation inside the lock
+      const claimed = await mutate((data) => {
+        const fresh = data.tgLogins[nonce];
+        if (!fresh || fresh.status !== 'confirmed' || !fresh.telegramId) return null;
+        delete data.tgLogins[nonce];
+        return { telegramId: fresh.telegramId, name: fresh.name || 'Telegram' };
+      });
+      if (!claimed) {
+        res.json({ status: 'expired' });
+        return;
+      }
+      res.json({ status: 'ok', ...(await finishTelegramLogin(claimed.telegramId, claimed.name)) });
+    })
+  );
+
+  // 3. Telegram calls this when the user writes to the bot or presses a button
+  app.post(
+    WEBHOOK_PATH,
+    wrap(async (req, res) => {
+      if (!getTelegramBotName() || req.get('x-telegram-bot-api-secret-token') !== webhookSecret()) {
+        throw new HttpError(401, 'Unauthorized');
+      }
+      const update = (req.body || {}) as {
+        message?: { chat?: { id: number }; from?: TgUser; text?: string };
+        callback_query?: { id: string; from: TgUser; data?: string; message?: { chat: { id: number }; message_id: number } };
+      };
+
+      try {
+        const msg = update.message;
+        const startMatch = /^\/start login_([A-Za-z0-9_-]{16,40})$/.exec(msg?.text?.trim() || '');
+        if (msg?.chat && startMatch) {
+          // The link is checked (with fresh data) when the user presses Confirm
+          await telegramApi('sendMessage', {
+                chat_id: msg.chat.id,
+                text:
+                  'Вход на сайт AlMart (tezbazar.vercel.app).\n\n' +
+                  'Нажмите «Подтвердить», только если вы сами только что нажали «Войти через Telegram» на сайте.',
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: '✅ Подтвердить вход', callback_data: `ok:${startMatch[1]}` },
+                    { text: 'Отмена', callback_data: 'no' }
+                  ]]
+                }
+              });
+        } else if (msg?.chat && msg.text?.startsWith('/start')) {
+          await telegramApi('sendMessage', {
+            chat_id: msg.chat.id,
+            text: 'Это бот для входа на AlMart. Откройте сайт https://tezbazar.vercel.app и нажмите «Войти через Telegram».'
+          });
+        }
+
+        const cb = update.callback_query;
+        if (cb) {
+          const okMatch = /^ok:([A-Za-z0-9_-]{16,40})$/.exec(cb.data || '');
+          let reply = 'Вход отменён.';
+          if (okMatch) {
+            const nonce = okMatch[1];
+            const confirmed = await mutate((data) => {
+              const rec = data.tgLogins[nonce];
+              if (!rec || rec.status !== 'pending' || Date.now() - rec.createdAt > TG_LOGIN_TTL_MS) return false;
+              rec.status = 'confirmed';
+              rec.telegramId = String(cb.from.id);
+              rec.name = displayName(cb.from);
+              return true;
+            });
+            reply = confirmed
+              ? '✅ Готово! Вернитесь на сайт AlMart — вы уже вошли.'
+              : 'Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.';
+          }
+          await telegramApi('answerCallbackQuery', { callback_query_id: cb.id });
+          if (cb.message) {
+            await telegramApi('editMessageText', {
+              chat_id: cb.message.chat.id,
+              message_id: cb.message.message_id,
+              text: reply
+            });
+          }
+        }
+      } catch (err) {
+        // Never make Telegram retry the same update forever
+        console.error('Telegram webhook error', err);
+      }
+      res.json({ ok: true });
     })
   );
 

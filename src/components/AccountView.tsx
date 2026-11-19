@@ -18,7 +18,7 @@ import { formatKyrgyzPhoneInput, isValidKyrgyzPhone, getLocalizedTitle, formatPr
 import { getLocationName } from '../data/locations';
 import { ListingCard } from './ListingCard';
 import { GoogleSignInButton } from './GoogleSignInButton';
-import { TelegramLoginButton, type TelegramAuthData } from './TelegramLoginButton';
+import { TelegramBotLogin } from './TelegramBotLogin';
 
 interface AccountViewProps {
   user: UserProfile | null;
@@ -172,25 +172,6 @@ export function AccountView({
       onLogin(data.user, data.favorites || [], data.token);
     } catch {
       setAuthError(networkError);
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleTelegramAuth = async (payload: TelegramAuthData) => {
-    setAuthError(null);
-    setAuthLoading(true);
-    try {
-      const res = await fetch('/api/auth/telegram', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error('telegram auth failed');
-      const data = (await res.json()) as { user: UserProfile; favorites: string[]; token: string };
-      onLogin(data.user, data.favorites || [], data.token);
-    } catch {
-      setAuthError(lang === 'kg' ? 'Telegram аркылуу кирүү ишке ашкан жок' : 'Не удалось войти через Telegram');
     } finally {
       setAuthLoading(false);
     }
@@ -396,10 +377,7 @@ export function AccountView({
                       ? 'Telegram аккаунтуңуз менен бир баскыч менен кириңиз.'
                       : 'Войдите одной кнопкой через ваш аккаунт Telegram.'}
                   </p>
-                  <TelegramLoginButton botName={authConfig.telegramBot} lang={lang} onAuth={handleTelegramAuth} />
-                  {authLoading && (
-                    <p className="text-center text-xs text-slate-500">{lang === 'kg' ? 'Текшерилүүдө…' : 'Проверяем…'}</p>
-                  )}
+                  <TelegramBotLogin lang={lang} onLogin={onLogin} />
                 </>
               ) : (
                 <p className="text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-3.5">
