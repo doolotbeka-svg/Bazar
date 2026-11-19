@@ -1,19 +1,14 @@
-import { randomBytes, randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import express from 'express';
 import { MARKETPLACE_CATEGORIES } from '../src/data/categories.ts';
 import { KYRGYZSTAN_LOCATIONS } from '../src/data/locations.ts';
 import type { CategoryId, Listing, PromoteTier, UserProfile } from '../src/types/marketplace.ts';
 import { createStorage, IMAGE_ROUTE_PREFIX } from './storage.ts';
 import { getDb } from './db.ts';
-import { createRepo, type Repo } from './repo.ts';
-import {
-  createListingKey,
-  createSessionToken,
-  hashOtp,
-  otpMatches,
-  verifyListingKey,
-  verifySessionToken
-} from './auth.ts';
+import { createAdminRepo, createRepo, type AdminRepo, type Repo } from './repo.ts';
+import { createListingKey, createSessionToken, hashOtp, otpMatches, verifyListingKey } from './auth.ts';
+import { HttpError, sessionUserId, str, wrap } from './http.ts';
+import { registerAdminRoutes } from './admin.ts';
 import { getGoogleClientId, verifyGoogleIdToken } from './google.ts';
 import { getTelegramBotName, verifyTelegramAuth } from './telegram.ts';
 import {
@@ -32,35 +27,6 @@ const CATEGORY_IDS = new Set<string>(MARKETPLACE_CATEGORIES.map((c) => c.id));
 const LOCATION_IDS = new Set<string>(KYRGYZSTAN_LOCATIONS.map((l) => l.id));
 // The client compresses photos to <=300k chars; allow headroom but reject raw camera files
 const MAX_IMAGE_DATA_URL_CHARS = 600_000;
-
-/** Safely read a trimmed string from untrusted JSON input. */
-function str(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-type AsyncHandler = (req: express.Request, res: express.Response) => Promise<void>;
-/** Express 4 does not catch rejected promises; forward them to the error handler. */
-const wrap =
-  (fn: AsyncHandler): express.RequestHandler =>
-  (req, res, next) => {
-    fn(req, res).catch(next);
-  };
-
-class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string
-  ) {
-    super(message);
-  }
-}
-
-/** User id from `Authorization: Bearer <session token>`, or null. */
-function sessionUserId(req: express.Request): string | null {
-  const header = req.get('authorization') || '';
-  const match = /^Bearer\s+(\S+)$/i.exec(header);
-  return match ? verifySessionToken(match[1]) : null;
-}
 
 /**
  * The caller may change a listing if they are signed in as its seller,
@@ -92,16 +58,22 @@ export function createApiApp() {
       });
     return repoPromise;
   };
+  // getDb() caches the connection, so this only builds the query helpers
+  const adminRepo = (): Promise<AdminRepo> => repo().then(() => getDb(storage)).then(createAdminRepo);
 
-  const getListingOr404 = async (id: string): Promise<Listing> => {
+  const getListingOr404 = async (id: string, refuseBlocked = false): Promise<Listing> => {
     const listing = await (await repo()).getListing(id);
     if (!listing) throw new HttpError(404, 'Listing not found');
+    if (refuseBlocked && listing.status === 'blocked') throw new HttpError(403, 'Listing was blocked by a moderator');
     return listing;
   };
 
   /** Find or create the user and return what the client needs after sign-in. */
   const signIn = async (profile: UserProfile) => {
     const r = await repo();
+    if (await (await adminRepo()).isUserBlocked(profile.id)) {
+      throw new HttpError(403, 'This account has been blocked');
+    }
     const user = await r.ensureUser(profile);
     return { user, favorites: await r.getFavorites(user.id), token: createSessionToken(user.id) };
   };
@@ -146,6 +118,9 @@ export function createApiApp() {
 
       // The seller is whoever is signed in; a client-supplied sellerId is ignored
       const sellerId = sessionUserId(req) || 'guest';
+      if (sellerId !== 'guest' && (await (await adminRepo()).isUserBlocked(sellerId))) {
+        throw new HttpError(403, 'This account has been blocked');
+      }
       const id = `kg-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
       // Upload photos first; keep only the ones that succeed
@@ -207,7 +182,7 @@ export function createApiApp() {
     '/api/listings/:id/status',
     wrap(async (req, res) => {
       const status = req.body?.status === 'sold' ? 'sold' : 'active';
-      assertCanManage(req, await getListingOr404(req.params.id));
+      assertCanManage(req, await getListingOr404(req.params.id, true));
       const listing = await (await repo()).setStatus(req.params.id, status);
       if (!listing) throw new HttpError(404, 'Listing not found');
       res.json({ listing });
@@ -221,7 +196,7 @@ export function createApiApp() {
       if (tier !== 'vip' && tier !== 'top' && tier !== 'none') {
         throw new HttpError(400, 'Invalid promotion tier');
       }
-      assertCanManage(req, await getListingOr404(req.params.id));
+      assertCanManage(req, await getListingOr404(req.params.id, true));
       const listing = await (await repo()).setPromoteTier(req.params.id, tier);
       if (!listing) throw new HttpError(404, 'Listing not found');
       res.json({ listing });
@@ -240,6 +215,48 @@ export function createApiApp() {
         console.error('Image cleanup failed', err);
       }
       res.json({ ok: true });
+    })
+  );
+
+  /* ---------------- reports ("Пожаловаться") ---------------- */
+
+  const REPORT_REASONS = new Set(['fraud', 'prohibited', 'wrong_info', 'duplicate', 'sold', 'offensive', 'other']);
+
+  app.post(
+    '/api/listings/:id/report',
+    wrap(async (req, res) => {
+      const reason = str(req.body?.reason);
+      if (!REPORT_REASONS.has(reason)) throw new HttpError(400, 'Invalid reason');
+      const comment = str(req.body?.comment).slice(0, 1000);
+      const listing = await getListingOr404(req.params.id);
+      if (listing.status === 'blocked') {
+        res.json({ ok: true });
+        return;
+      }
+      // Signed-in users are counted by account, guests by a hash of their IP address
+      const ip = (req.get('x-forwarded-for') || req.socket.remoteAddress || '').split(',')[0].trim();
+      const reporter =
+        sessionUserId(req) || `ip-${createHash('sha256').update(`almart-report:${ip}`).digest('hex').slice(0, 16)}`;
+      const result = await (await adminRepo()).createReport(listing.id, reason, comment, reporter);
+      if (result === 'limit') throw new HttpError(429, 'Too many reports today');
+      res.status(result === 'ok' ? 201 : 200).json({ ok: true });
+    })
+  );
+
+  /* ---------------- site settings shown to everyone ---------------- */
+
+  app.get(
+    '/api/site',
+    wrap(async (_req, res) => {
+      const raw = await (await adminRepo()).getSetting('announcement');
+      let announcement: { kg: string; ru: string } | null = null;
+      try {
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed && (parsed.kg || parsed.ru)) announcement = { kg: String(parsed.kg || ''), ru: String(parsed.ru || '') };
+      } catch {
+        // ignore a malformed setting
+      }
+      res.json({ announcement });
     })
   );
 
@@ -526,6 +543,8 @@ export function createApiApp() {
       res.json({ favorites });
     })
   );
+
+  registerAdminRoutes(app, { adminRepo, storage });
 
   // Unknown API routes must return JSON 404, not the SPA index.html
   app.use('/api', (_req, res) => {

@@ -14,7 +14,8 @@ export type Currency = 'KGS' | 'USD';
 
 export type PromoteTier = 'none' | 'vip' | 'top';
 
-export type ListingStatus = 'active' | 'sold';
+/** 'blocked' = hidden by a moderator; only admins see it. */
+export type ListingStatus = 'active' | 'sold' | 'blocked';
 
 export interface LocationItem {
   id: string;
