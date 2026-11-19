@@ -322,11 +322,21 @@ export function createApiApp() {
 
   const formatPhone = (d: string) => `+${d.slice(0, 3)} (${d.slice(3, 6)}) ${d.slice(6, 8)}-${d.slice(8, 10)}-${d.slice(10)}`;
 
+  // In demo mode the code is shown on screen, so anyone could sign in as any
+  // number. On the live site phone sign-in is therefore off until real SMS
+  // delivery is configured (PHONE_DEMO_LOGIN=1 re-enables it on purpose).
+  const isProduction = Boolean(process.env.VERCEL) || process.env.NODE_ENV === 'production';
+  const phoneLoginEnabled = !isSmsDemoMode(sms) || !isProduction || process.env.PHONE_DEMO_LOGIN === '1';
+  const assertPhoneLogin = () => {
+    if (!phoneLoginEnabled) throw new HttpError(404, 'Phone sign-in is not available yet');
+  };
+
   // What the sign-in screen can offer
   app.get('/api/auth/config', (_req, res) => {
     res.json({
       googleClientId: getGoogleClientId(),
       telegramBot: getTelegramBotName(),
+      phoneLogin: phoneLoginEnabled,
       smsDemo: isSmsDemoMode(sms)
     });
   });
@@ -334,6 +344,7 @@ export function createApiApp() {
   app.post(
     '/api/auth/send-otp',
     wrap(async (req, res) => {
+      assertPhoneLogin();
       const digits = kgPhoneDigits(req.body?.phone);
       if (!digits) throw new HttpError(400, 'Invalid phone number');
 
@@ -387,6 +398,7 @@ export function createApiApp() {
   app.post(
     '/api/auth/verify-otp',
     wrap(async (req, res) => {
+      assertPhoneLogin();
       const digits = kgPhoneDigits(req.body?.phone);
       const code = str(req.body?.code);
       if (!digits || !/^\d{6}$/.test(code)) throw new HttpError(400, 'Invalid phone or code');
