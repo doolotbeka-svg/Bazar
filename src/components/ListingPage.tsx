@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Flag,
   Heart,
   ImageOff,
   MapPin,
@@ -24,6 +25,7 @@ import {
   getWhatsappHref
 } from '../utils/format';
 import { ListingCard } from './ListingCard';
+import { ReportModal } from './ReportModal';
 
 interface ListingPageProps {
   listing: Listing;
@@ -51,6 +53,7 @@ export function ListingPage({
   const [phoneShown, setPhoneShown] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
   const [overrideLang, setOverrideLang] = useState<'kg' | 'ru' | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   useEffect(() => {
     setPhoto(0);
@@ -58,6 +61,7 @@ export function ListingPage({
     setPhoneShown(false);
     setCopiedShare(false);
     setOverrideLang(null);
+    setReportOpen(false);
     window.scrollTo({ top: 0 });
   }, [listing.id]);
 
@@ -137,6 +141,17 @@ export function ListingPage({
       <MessageCircle className="w-5 h-5" />
       {t('detail.whatsapp')}
     </a>
+  );
+
+  const reportButton = (
+    <button
+      type="button"
+      onClick={() => setReportOpen(true)}
+      className="self-start flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-rose-600 cursor-pointer"
+    >
+      <Flag className="w-4 h-4" />
+      {lang === 'kg' ? 'Жарыяга даттануу' : 'Пожаловаться на объявление'}
+    </button>
   );
 
   return (
@@ -330,6 +345,7 @@ export function ListingPage({
               <ShieldAlert className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
               <span>{t('detail.safetyTip')}</span>
             </div>
+            {reportButton}
           </div>
         </aside>
       </div>
@@ -350,6 +366,7 @@ export function ListingPage({
         <ShieldAlert className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
         <span>{t('detail.safetyTip')}</span>
       </div>
+      <div className="lg:hidden mt-3 flex">{reportButton}</div>
 
       {/* Similar */}
       {similar.length > 0 && (
@@ -368,6 +385,8 @@ export function ListingPage({
           </div>
         </section>
       )}
+
+      {reportOpen && <ReportModal listingId={listing.id} onClose={() => setReportOpen(false)} />}
 
       {/* Mobile sticky contact bar */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 p-3 flex gap-2">

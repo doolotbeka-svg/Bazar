@@ -66,6 +66,25 @@ const SCHEMA = [
      status text NOT NULL DEFAULT 'pending',
      telegram_id text,
      name text
+   )`,
+  // Moderation
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked boolean NOT NULL DEFAULT false`,
+  `CREATE TABLE IF NOT EXISTS reports (
+     id bigserial PRIMARY KEY,
+     listing_id text NOT NULL,
+     reason text NOT NULL,
+     comment text NOT NULL DEFAULT '',
+     reporter text NOT NULL,
+     status text NOT NULL DEFAULT 'open',
+     created_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS reports_status_idx ON reports (status, created_at DESC)`,
+  // One open report per listing per person
+  `CREATE UNIQUE INDEX IF NOT EXISTS reports_open_once ON reports (listing_id, reporter) WHERE status = 'open'`,
+  `CREATE TABLE IF NOT EXISTS admins (
+     user_id text PRIMARY KEY,
+     added_by text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now()
    )`
 ];
 

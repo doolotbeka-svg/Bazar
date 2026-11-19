@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutGrid, List, SearchX, SlidersHorizontal, X } from 'lucide-react';
+import { LayoutGrid, List, Megaphone, SearchX, Shield, SlidersHorizontal, X } from 'lucide-react';
 import { useI18n } from './contexts/I18nContext';
 import { SEED_LISTINGS } from './data/seedListings';
 import { matchesLocationFilter, KYRGYZSTAN_LOCATIONS, getLocationName } from './data/locations';
@@ -122,6 +122,32 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  // Site-wide announcement set from the admin panel
+  const [announcement, setAnnouncement] = useState<{ kg: string; ru: string } | null>(null);
+  useEffect(() => {
+    fetch('/api/site')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { announcement?: { kg: string; ru: string } | null } | null) => setAnnouncement(data?.announcement ?? null))
+      .catch(() => {});
+  }, []);
+
+  // Show a link to the admin panel to admins
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+    let active = true;
+    fetch('/api/admin/me', { headers: authHeaders(undefined, false) })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { isAdmin?: boolean } | null) => active && setIsAdmin(Boolean(data?.isAdmin)))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   // Browser back/forward between the feed and a listing page
   useEffect(() => {
@@ -622,6 +648,15 @@ export default function App() {
         listings={listings}
       />
 
+      {announcement && (announcement[lang] || announcement.kg || announcement.ru) && (
+        <div className="bg-amber-50 border-b border-amber-100">
+          <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-2.5 flex items-start gap-2 text-[14px] text-amber-900">
+            <Megaphone className="w-4.5 h-4.5 shrink-0 mt-0.5" />
+            <span>{announcement[lang] || announcement.kg || announcement.ru}</span>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 md:px-6">{page}</main>
 
       <footer className="bg-tile mt-auto">
@@ -676,6 +711,12 @@ export default function App() {
           <a href="/privacy" className="hover:text-brand-700 hover:underline">
             {lang === 'kg' ? 'Купуялуулук саясаты' : 'Политика конфиденциальности'}
           </a>
+          {isAdmin && (
+            <a href="/#admin" className="flex items-center gap-1 font-semibold text-brand-700 hover:underline">
+              <Shield className="w-3.5 h-3.5" />
+              {lang === 'kg' ? 'Админ панель' : 'Админка'}
+            </a>
+          )}
         </div>
       </footer>
 

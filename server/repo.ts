@@ -25,7 +25,7 @@ function toListing(r: ListingRow): Listing {
     id: r.id,
     sellerId: r.seller_id,
     createdAt: new Date(r.created_at).toISOString(),
-    status: r.status === 'sold' ? 'sold' : 'active',
+    status: r.status === 'sold' || r.status === 'blocked' ? r.status : 'active',
     promoteTier: (r.promote_tier as PromoteTier) || 'none',
     views: Number(r.views) || 0
   };
@@ -35,8 +35,11 @@ export function createRepo(db: Db) {
   return {
     /* ---------------- listings ---------------- */
 
+    /** Public feed: everything except listings hidden by a moderator. */
     async listListings(): Promise<Listing[]> {
-      const rows = await db.query<ListingRow>(`SELECT ${LISTING_COLS} FROM listings ORDER BY created_at DESC LIMIT 2000`);
+      const rows = await db.query<ListingRow>(
+        `SELECT ${LISTING_COLS} FROM listings WHERE status <> 'blocked' ORDER BY created_at DESC LIMIT 2000`
+      );
       return rows.map(toListing);
     },
 
@@ -58,16 +61,20 @@ export function createRepo(db: Db) {
       return row ? Number(row.views) : null;
     },
 
+    /** Seller's own change; a listing blocked by a moderator cannot be re-activated this way. */
     async setStatus(id: string, status: 'active' | 'sold'): Promise<Listing | null> {
-      const [row] = await db.query<ListingRow>(`UPDATE listings SET status = $2 WHERE id = $1 RETURNING ${LISTING_COLS}`, [id, status]);
+      const [row] = await db.query<ListingRow>(
+        `UPDATE listings SET status = $2 WHERE id = $1 AND status <> 'blocked' RETURNING ${LISTING_COLS}`,
+        [id, status]
+      );
       return row ? toListing(row) : null;
     },
 
     async setPromoteTier(id: string, tier: PromoteTier): Promise<Listing | null> {
-      const [row] = await db.query<ListingRow>(`UPDATE listings SET promote_tier = $2 WHERE id = $1 RETURNING ${LISTING_COLS}`, [
-        id,
-        tier
-      ]);
+      const [row] = await db.query<ListingRow>(
+        `UPDATE listings SET promote_tier = $2 WHERE id = $1 AND status <> 'blocked' RETURNING ${LISTING_COLS}`,
+        [id, tier]
+      );
       return row ? toListing(row) : null;
     },
 
@@ -207,3 +214,231 @@ export function createRepo(db: Db) {
 }
 
 export type Repo = ReturnType<typeof createRepo>;
+
+/* ======================= moderation & admin ======================= */
+
+export type ReportRow = {
+  id: string;
+  listingId: string;
+  reason: string;
+  comment: string;
+  reporter: string;
+  status: string;
+  createdAt: string;
+  listingTitle: string | null;
+  listingStatus: string | null;
+};
+
+export type AdminUserRow = {
+  id: string;
+  name: string;
+  authMethod: string;
+  email?: string;
+  phone?: string;
+  createdAt: string;
+  blocked: boolean;
+  listings: number;
+};
+
+export function createAdminRepo(db: Db) {
+  return {
+    async stats() {
+      const [row] = await db.query<Record<string, string | number>>(
+        `SELECT
+           (SELECT count(*) FROM listings) AS listings,
+           (SELECT count(*) FROM listings WHERE status = 'active') AS active,
+           (SELECT count(*) FROM listings WHERE status = 'blocked') AS blocked,
+           (SELECT count(*) FROM listings WHERE created_at > now() - interval '1 day') AS new_today,
+           (SELECT count(*) FROM users) AS users,
+           (SELECT count(*) FROM users WHERE blocked) AS blocked_users,
+           (SELECT count(*) FROM reports WHERE status = 'open') AS open_reports`
+      );
+      return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v)]));
+    },
+
+    /* ---- listings ---- */
+
+    async listListings(q: string, status: string): Promise<(Listing & { openReports: number })[]> {
+      const params: unknown[] = [];
+      const where: string[] = [];
+      if (status && status !== 'all') {
+        params.push(status);
+        where.push(`l.status = $${params.length}`);
+      }
+      if (q) {
+        params.push(`%${q}%`);
+        const p = `$${params.length}`;
+        where.push(
+          `(l.id ILIKE ${p} OR l.seller_id ILIKE ${p} OR l.data->>'titleKg' ILIKE ${p} OR l.data->>'titleRu' ILIKE ${p} OR l.data->>'phone' ILIKE ${p} OR l.data->>'sellerName' ILIKE ${p})`
+        );
+      }
+      const rows = await db.query<ListingRow & { open_reports: string | number }>(
+        `SELECT l.id, l.seller_id, l.created_at, l.status, l.promote_tier, l.views, l.data,
+                (SELECT count(*) FROM reports r WHERE r.listing_id = l.id AND r.status = 'open') AS open_reports
+         FROM listings l ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY l.created_at DESC LIMIT 500`,
+        params
+      );
+      return rows.map((r) => ({ ...toListing(r), openReports: Number(r.open_reports) }));
+    },
+
+    async getListing(id: string): Promise<Listing | null> {
+      const [row] = await db.query<ListingRow>(`SELECT ${LISTING_COLS} FROM listings WHERE id = $1`, [id]);
+      return row ? toListing(row) : null;
+    },
+
+    async deleteListing(id: string): Promise<boolean> {
+      const rows = await db.query(`DELETE FROM listings WHERE id = $1 RETURNING id`, [id]);
+      return rows.length > 0;
+    },
+
+    /** Replace everything an admin may edit (views and creation date are kept separately). */
+    async saveListing(l: Listing): Promise<Listing | null> {
+      const { id, sellerId: _s, createdAt: _c, status, promoteTier, views, ...data } = l;
+      const [row] = await db.query<ListingRow>(
+        `UPDATE listings SET status = $2, promote_tier = $3, views = $4, data = $5 WHERE id = $1 RETURNING ${LISTING_COLS}`,
+        [id, status, promoteTier, views, JSON.stringify(data)]
+      );
+      return row ? toListing(row) : null;
+    },
+
+    /* ---- reports ---- */
+
+    async createReport(listingId: string, reason: string, comment: string, reporter: string): Promise<'ok' | 'duplicate' | 'limit'> {
+      const [{ n }] = await db.query<{ n: string | number }>(
+        `SELECT count(*) AS n FROM reports WHERE reporter = $1 AND created_at > now() - interval '1 day'`,
+        [reporter]
+      );
+      if (Number(n) >= 20) return 'limit';
+      const rows = await db.query(
+        `INSERT INTO reports (listing_id, reason, comment, reporter) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (listing_id, reporter) WHERE status = 'open' DO NOTHING RETURNING id`,
+        [listingId, reason, comment, reporter]
+      );
+      return rows.length ? 'ok' : 'duplicate';
+    },
+
+    async listReports(status: string): Promise<ReportRow[]> {
+      const rows = await db.query<Record<string, unknown>>(
+        `SELECT r.id, r.listing_id, r.reason, r.comment, r.reporter, r.status, r.created_at,
+                COALESCE(l.data->>'titleRu', l.data->>'titleKg') AS listing_title, l.status AS listing_status
+         FROM reports r LEFT JOIN listings l ON l.id = r.listing_id
+         ${status === 'all' ? '' : 'WHERE r.status = $1'}
+         ORDER BY r.created_at DESC LIMIT 500`,
+        status === 'all' ? [] : [status]
+      );
+      return rows.map((r) => ({
+        id: String(r.id),
+        listingId: String(r.listing_id),
+        reason: String(r.reason),
+        comment: String(r.comment ?? ''),
+        reporter: String(r.reporter),
+        status: String(r.status),
+        createdAt: new Date(r.created_at as string).toISOString(),
+        listingTitle: (r.listing_title as string | null) ?? null,
+        listingStatus: (r.listing_status as string | null) ?? null
+      }));
+    },
+
+    async setReportStatus(id: string, status: 'open' | 'resolved' | 'rejected'): Promise<boolean> {
+      // Re-opening a report could clash with a newer open one from the same person
+      const rows = await db.query(`UPDATE reports SET status = $2 WHERE id = $1 RETURNING id`, [id, status]).catch(() => []);
+      return rows.length > 0;
+    },
+
+    /** Close every open report about a listing (after it was handled). */
+    async resolveReportsFor(listingId: string): Promise<void> {
+      await db.query(`UPDATE reports SET status = 'resolved' WHERE listing_id = $1 AND status = 'open'`, [listingId]);
+    },
+
+    /* ---- users ---- */
+
+    async listUsers(q: string): Promise<AdminUserRow[]> {
+      const params: unknown[] = [];
+      let where = '';
+      if (q) {
+        params.push(`%${q}%`);
+        where = `WHERE u.id ILIKE $1 OR u.data->>'name' ILIKE $1 OR u.data->>'email' ILIKE $1 OR u.data->>'phone' ILIKE $1`;
+      }
+      const rows = await db.query<{ id: string; data: UserProfile; created_at: string; blocked: boolean; listings: string | number }>(
+        `SELECT u.id, u.data, u.created_at, u.blocked,
+                (SELECT count(*) FROM listings l WHERE l.seller_id = u.id) AS listings
+         FROM users u ${where} ORDER BY u.created_at DESC LIMIT 500`,
+        params
+      );
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.data?.name || r.id,
+        authMethod: r.data?.authMethod || '',
+        email: r.data?.email,
+        phone: r.data?.phone,
+        createdAt: new Date(r.created_at).toISOString(),
+        blocked: Boolean(r.blocked),
+        listings: Number(r.listings)
+      }));
+    },
+
+    async isUserBlocked(id: string): Promise<boolean> {
+      const [row] = await db.query<{ blocked: boolean }>(`SELECT blocked FROM users WHERE id = $1`, [id]);
+      return Boolean(row?.blocked);
+    },
+
+    /** Block/unblock an account; blocking also hides all of its listings. */
+    async setUserBlocked(id: string, blocked: boolean): Promise<boolean> {
+      const rows = await db.query(`UPDATE users SET blocked = $2 WHERE id = $1 RETURNING id`, [id, blocked]);
+      if (rows.length && blocked) {
+        await db.query(`UPDATE listings SET status = 'blocked' WHERE seller_id = $1`, [id]);
+      }
+      return rows.length > 0;
+    },
+
+    async listingsOfSeller(sellerId: string): Promise<Listing[]> {
+      const rows = await db.query<ListingRow>(`SELECT ${LISTING_COLS} FROM listings WHERE seller_id = $1`, [sellerId]);
+      return rows.map(toListing);
+    },
+
+    /* ---- admins ---- */
+
+    async listAdmins(): Promise<{ userId: string; addedBy: string; createdAt: string; name: string | null }[]> {
+      const rows = await db.query<{ user_id: string; added_by: string; created_at: string; name: string | null }>(
+        `SELECT a.user_id, a.added_by, a.created_at, u.data->>'name' AS name
+         FROM admins a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.created_at`
+      );
+      return rows.map((r) => ({
+        userId: r.user_id,
+        addedBy: r.added_by,
+        createdAt: new Date(r.created_at).toISOString(),
+        name: r.name
+      }));
+    },
+
+    async isDbAdmin(userId: string): Promise<boolean> {
+      const rows = await db.query(`SELECT 1 FROM admins WHERE user_id = $1`, [userId]);
+      return rows.length > 0;
+    },
+
+    async addAdmin(userId: string, addedBy: string): Promise<void> {
+      await db.query(`INSERT INTO admins (user_id, added_by) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING`, [userId, addedBy]);
+    },
+
+    async removeAdmin(userId: string): Promise<void> {
+      await db.query(`DELETE FROM admins WHERE user_id = $1`, [userId]);
+    },
+
+    /* ---- site settings (announcement banner) ---- */
+
+    async getSetting(key: string): Promise<string | null> {
+      const [row] = await db.query<{ value: string }>(`SELECT value FROM meta WHERE key = $1`, [`setting:${key}`]);
+      return row?.value ?? null;
+    },
+
+    async setSetting(key: string, value: string): Promise<void> {
+      await db.query(
+        `INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [`setting:${key}`, value]
+      );
+    }
+  };
+}
+
+export type AdminRepo = ReturnType<typeof createAdminRepo>;
