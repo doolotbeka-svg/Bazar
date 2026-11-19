@@ -419,6 +419,22 @@ export function AccountView({
               )}
             </div>
           )}
+
+          <p className="mt-5 text-[11px] leading-relaxed text-slate-500 text-center">
+            {lang === 'kg' ? (
+              <>
+                Кирүү менен сиз{' '}
+                <a href="/terms" className="underline hover:text-brand-700">Колдонуу шарттарын</a> жана{' '}
+                <a href="/privacy" className="underline hover:text-brand-700">Купуялуулук саясатын</a> кабыл аласыз.
+              </>
+            ) : (
+              <>
+                Входя, вы принимаете{' '}
+                <a href="/terms" className="underline hover:text-brand-700">Условия использования</a> и{' '}
+                <a href="/privacy" className="underline hover:text-brand-700">Политику конфиденциальности</a>.
+              </>
+            )}
+          </p>
         </div>
       </div>
     );

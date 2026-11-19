@@ -668,8 +668,14 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="border-t border-black/5 py-4 px-4 text-center text-xs text-slate-500">
-          {t('footer.copyright')}
+        <div className="border-t border-black/5 py-4 px-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-slate-500">
+          <span>{t('footer.copyright')}</span>
+          <a href="/terms" className="hover:text-brand-700 hover:underline">
+            {lang === 'kg' ? 'Колдонуу шарттары' : 'Условия использования'}
+          </a>
+          <a href="/privacy" className="hover:text-brand-700 hover:underline">
+            {lang === 'kg' ? 'Купуялуулук саясаты' : 'Политика конфиденциальности'}
+          </a>
         </div>
       </footer>
 
